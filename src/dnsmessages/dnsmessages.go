@@ -54,6 +54,7 @@ func (w *DNSMessageWriter) XfrName(a *dnsstorage.DNSName, compress bool) {
 		w.XfrUInt8(uint8(l.Len()))
 		w.XfrBlob(l.Label)
 	}
+	w.XfrUInt8(uint8(0))
 }
 
 func (w *DNSMessageWriter) serializeHeader(hbytes []byte) {
@@ -72,7 +73,7 @@ func (w *DNSMessageWriter) serializeHeader(hbytes []byte) {
 }
 
 func (w *DNSMessageWriter) Serialize() []byte {
-	ret := make([]byte, 12 + len(w.payload))
+	ret := make([]byte, 12 + w.payloadpos)
 	w.serializeHeader(ret);
 	copy(ret[12:], w.payload);
 	return ret;

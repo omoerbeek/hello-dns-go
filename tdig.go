@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"dnsstorage"
+	"math/rand"
 )
 
 func main() {
@@ -25,6 +26,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Could not contact %s: %s", args[3], err)
 	}
 	writer := dnsmessages.NewDNSMessageWriter(dn, dtype, dnsstorage.IN, 8192);
+	writer.DH.SetBit(dnsstorage.RD_MASK)
+	writer.DH.Id = uint16(rand.Int())
 	msg := writer.Serialize();
 	conn.Write(msg)
 

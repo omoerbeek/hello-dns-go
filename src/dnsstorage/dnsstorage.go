@@ -84,29 +84,29 @@ const (
 
 )
 
-func SetHeaderBit(h *DNSHeader, mask uint16) {
+func (h *DNSHeader) SetBit( mask uint16) {
 	h.Second |= mask
 }
 
-func ClearHeaderBit(h *DNSHeader, mask uint16) {
+func (h *DNSHeader) ClearHeaderBit(mask uint16) {
 	h.Second &^= mask
 }
 
-func SetOpcode(h *DNSHeader, val uint16) {
+func (h *DNSHeader) SetOpcode(val uint16) {
 	h.Second &^= OPCODE_MASK
 	h.Second |= OPCODE_MASK & (val << 12)
 }
 
-func GetOpcode(h *DNSHeader, val uint16) uint16 {
+func (h *DNSHeader) GetOpcode(val uint16) uint16 {
 	return (h.Second & OPCODE_MASK) >> 12
 }
 
-func SetRcode(h *DNSHeader, val uint16) {
+func (h *DNSHeader) SetRcode(val uint16) {
 	h.Second &^= RCODE_MASK
 	h.Second |= (RCODE_MASK & val) << 0
 }
 
-func GetRcode(h *DNSHeader, val uint16) uint16 {
+func (h *DNSHeader) GetRcode(val uint16) uint16 {
 	return (h.Second & RCODE_MASK) >> 0
 }
 
