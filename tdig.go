@@ -1,12 +1,15 @@
 package main
 
 import (
-	"dnsmessages"
+	"crypto/rand"
 	"fmt"
+	"math"
+	"math/big"
 	"net"
 	"os"
+
+	"dnsmessages"
 	"dnsstorage"
-	"math/rand"
 )
 
 func main() {
@@ -16,8 +19,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	dn := dnsstorage.MakeDNSName(args[1]);
-	dtype := dnsstorage.MakeDNSType(args[2]);
+	dn := dnsstorage.MakeDNSName(args[1])
+	dtype := dnsstorage.MakeDNSType(args[2])
 
 	fmt.Println(dn, dtype)
 
@@ -25,13 +28,17 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not contact %s: %s", args[3], err)
 	}
-	writer := dnsmessages.NewDNSMessageWriter(dn, dtype, dnsstorage.IN, 8192);
+	writer := dnsmessages.NewDNSMessageWriter(dn, dtype, dnsstorage.IN, math.MaxUint16)
 	writer.DH.SetBit(dnsstorage.RD_MASK)
-	writer.DH.Id = uint16(rand.Int())
-	msg := writer.Serialize();
+
+	// Use a good random source out of principle
+	r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
+	writer.DH.Id = uint16(r.Int64())
+
+	msg := writer.Serialize()
 	conn.Write(msg)
 
-	data := make([]byte, 65535)
+	data := make([]byte, math.MaxUint16)
 	nread, err := conn.Read(data)
 	fmt.Printf("Read %d: %s %s", nread, err, data)
 }
