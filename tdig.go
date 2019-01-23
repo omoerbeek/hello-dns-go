@@ -8,8 +8,7 @@ import (
 	"net"
 	"os"
 
-	"dnsmessages"
-	"dnsstorage"
+	"tdns"
 )
 
 func main() {
@@ -19,8 +18,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	dn := dnsstorage.MakeDNSName(args[1])
-	dtype := dnsstorage.MakeDNSType(args[2])
+	dn := tdns.MakeDNSName(args[1])
+	dtype := tdns.MakeDNSType(args[2])
 
 	fmt.Println(dn, dtype)
 
@@ -28,8 +27,8 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not contact %s: %s", args[3], err)
 	}
-	writer := dnsmessages.NewDNSMessageWriter(dn, dtype, dnsstorage.IN, math.MaxUint16)
-	writer.DH.SetBit(dnsstorage.RD_MASK)
+	writer := tdns.NewDNSMessageWriter(dn, dtype, tdns.IN, math.MaxUint16)
+	writer.DH.SetBit(tdns.RdMask)
 
 	// Use a good random source out of principle
 	r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))

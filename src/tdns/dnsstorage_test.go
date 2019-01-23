@@ -1,4 +1,4 @@
-package dnsstorage
+package tdns
 
 import "testing"
 
@@ -61,7 +61,7 @@ func TestDNSLabel(t *testing.T) {
 
 func TestDNSName(t *testing.T) {
 	tests1 := []struct {
-		name *DNSName
+		name *Name
 		str  string
 	}{
 		{NewDNSName([]string{}), "."},
@@ -79,7 +79,7 @@ func TestDNSName(t *testing.T) {
 	}
 
 	tests2 := []struct {
-		a, b *DNSName
+		a, b *Name
 		x, y bool
 	}{
 		{NewDNSName([]string{}), NewDNSName([]string{}), false, false},
@@ -102,7 +102,7 @@ func TestDNSName(t *testing.T) {
 
 func TestMakeDNSName(t *testing.T) {
 	tests1 := []struct {
-		name *DNSName
+		name *Name
 		str  string
 	}{
 		{MakeDNSName(""), "."},

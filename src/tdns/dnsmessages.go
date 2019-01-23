@@ -1,20 +1,19 @@
-package dnsmessages
+package tdns
 
 import (
-	"dnsstorage"
 	"encoding/binary"
 )
 
 type DNSMessageWriter struct {
-	DH         dnsstorage.DNSHeader
-	name       *dnsstorage.DNSName
-	dnsqtype   dnsstorage.DNSType
-	class      dnsstorage.DNSClass
+	DH         DNSHeader
+	name       *Name
+	dnsqtype   Type
+	class      Class
 	payload    []byte
 	payloadpos int
 }
 
-func NewDNSMessageWriter(name *dnsstorage.DNSName, dnstype dnsstorage.DNSType, class dnsstorage.DNSClass, maxsize int) *DNSMessageWriter {
+func NewDNSMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *DNSMessageWriter {
 	r := new(DNSMessageWriter)
 	r.payload = make([]byte, maxsize-12, maxsize-12)
 	r.name = name
@@ -48,9 +47,9 @@ func (w *DNSMessageWriter) XfrBlob(data []byte) {
 	w.payloadpos += len(data);
 }
 
-func (w *DNSMessageWriter) XfrName(a *dnsstorage.DNSName, compress bool) {
+func (w *DNSMessageWriter) XfrName(a *Name, compress bool) {
 	for e := a.Name.Front(); e != nil; e = e.Next() {
-		l := e.Value.(*dnsstorage.DNSLabel)
+		l := e.Value.(*Label)
 		w.XfrUInt8(uint8(l.Len()))
 		w.XfrBlob(l.Label)
 	}
@@ -73,9 +72,8 @@ func (w *DNSMessageWriter) serializeHeader(hbytes []byte) {
 }
 
 func (w *DNSMessageWriter) Serialize() []byte {
-	ret := make([]byte, 12 + w.payloadpos)
+	ret := make([]byte, 12+w.payloadpos)
 	w.serializeHeader(ret);
 	copy(ret[12:], w.payload);
 	return ret;
 }
-
