@@ -86,9 +86,9 @@ const (
 )
 
 func (h *Header) String() string {
-	line1 := fmt.Sprintf("Header(Id=%04x Fl=%04x QD=%04x AN=%04x NS=%04x AR=%04x\n",
+	line1 := fmt.Sprintf("Header(Id=%#04x Fl=%#04x QD=%d AN=%d NS=%d AR=%0d\n",
 		h.Id, h.Flags, h.QDCount, h.ANCount, h.NSCount, h.ARCount)
-	line2 := fmt.Sprintf("Qr=%d OpCode=%x Aa=%d Tc=%d Rd=%d Ra=%d Un=%d, Ad=%d Cd=%d Rcode=%d)",
+	line2 := fmt.Sprintf("Qr=%d OpCode=%#x Aa=%d Tc=%d Rd=%d Ra=%d Un=%d, Ad=%d Cd=%d Rcode=%#x)",
 		h.Bit(QrMask),
 		h.Opcode(),
 		h.Bit(AaMask),

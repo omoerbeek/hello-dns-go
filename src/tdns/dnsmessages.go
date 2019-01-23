@@ -3,6 +3,7 @@ package tdns
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -117,15 +118,20 @@ type MessageReader struct {
 	haveEDNS    bool
 	payload     []byte
 	payloadpos  uint16
-	reader      *bytes.Reader
 	rrpos		uint16
 	endofrecord uint16 // needed?
 }
 
 func (r *MessageReader) String() string {
 	header := r.DH.String()
-	name := r.name.String()
-	return header + "\nName(" + name + ")"
+	if r.haveEDNS {
+		b := 0;
+		if r.doBit {
+			b = 1
+		}
+		header += fmt.Sprintf(" doBit=%d EDNSversion=%d bufsize=%d", b, r.ednsVersion, r.bufsize)
+	}
+	return header
 }
 
 func NewMessagReader(data []byte, length int) (*MessageReader, error) {
@@ -138,15 +144,15 @@ func NewMessagReader(data []byte, length int) (*MessageReader, error) {
 }
 
 func (r *MessageReader) Read(data []byte, length int) error {
-	r.reader = bytes.NewReader(data)
-	err := binary.Read(r.reader, binary.BigEndian, &r.DH)
+	reader := bytes.NewReader(data)
+	err := binary.Read(reader, binary.BigEndian, &r.DH)
 	if err != nil {
 		return err
 	}
 	r.payload = data[HeaderLen:length]
 
 	if r.DH.QDCount > 0 {
-		r.name = r.XfrName(nil)
+		r.name = r.getName(nil)
 		r.qtype = Type(r.getUint16(nil))
 		r.qclass = Class(r.getUint16(nil))
 	}
@@ -154,7 +160,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 	if r.DH.ARCount > 0 {
 		nowpos := r.payloadpos
 		r.skipRRs(int(r.DH.ANCount + r.DH.NSCount + r.DH.ARCount - 1))
-		if (r.getUint8(nil) != 0 && Type(r.getUint16(nil)) == OPT) {
+		if (r.getUint8(nil) == 0 && Type(r.getUint16(nil)) == OPT) {
 			r.bufsize = r.getUint16(nil)
 			r.getUint8(nil)
 			r.ednsVersion = r.getUint8(nil)
@@ -165,6 +171,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 			}
 			r.getUint8(nil)
 			r.getUint16(nil)
+			r.haveEDNS = true
 		}
 		r.payloadpos = nowpos
 	}
@@ -173,7 +180,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 
 func (r *MessageReader) skipRRs(num int) {
 	for i := 0; i < num; i++ {
-		r.XfrName(nil)
+		r.getName(nil)
 		r.payloadpos += 8 // type, class , ttl
 		l := r.getUint16(nil)
 		r.payloadpos += l
@@ -198,15 +205,27 @@ func (r *MessageReader) GetRR(section *Section, name **Name, dnstype *Type, ttl 
 
 	r.rrpos++
 
-	aname := *r.XfrName(nil)
-	*name = &aname
+	*name = r.getName(nil)
 	*dnstype = Type(r.getUint16(nil))
 	r.getUint16(nil) // class
 	*ttl = r.getUint32(nil)
 	l := r.getUint16(nil)
 	r.endofrecord = r.payloadpos + l
-	r.getBlob(l, nil)
-	*content = RRGen{}
+
+	var result RRGen
+	switch *dnstype {
+	case A:
+		result = new(AGen)
+	case AAAA:
+		result = new(AAAAGen)
+	case NS:
+		result = new(NSGen)
+	default:
+		result = new(UnknownGen)
+	}
+	result.Gen(r, l)
+	*content = result
+
 	return true
 }
 
@@ -248,7 +267,7 @@ func (r *MessageReader) getBlob(size uint16, pos *uint16) []byte {
 	return data
 }
 
-func (r *MessageReader) XfrName(pos *uint16) *Name {
+func (r *MessageReader) getName(pos *uint16) *Name {
 	ret := new(Name)
 	if pos == nil {
 		pos = &r.payloadpos
@@ -260,7 +279,7 @@ func (r *MessageReader) XfrName(pos *uint16) *Name {
 			newpos := ((labellen &^ 0xc0) << 8) | labellen2
 			newpos -= HeaderLen
 			if newpos < *pos {
-				ret.Append(r.XfrName(&newpos))
+				ret.Append(r.getName(&newpos))
 				return ret
 			} else {
 				panic("forward compression")
