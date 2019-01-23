@@ -21,9 +21,9 @@ type (
 
 	// We keep the header in host native format. Code that write or reads it from the
 	// wire is supposed to conversion
-	DNSHeader struct {
+	Header struct {
 		Id      uint16
-		Second  uint16
+		Flags   uint16
 		QDCount uint16
 		ANCount uint16
 		NSCount uint16
@@ -32,8 +32,8 @@ type (
 )
 
 const (
-	HeaderLen = 12
-	MaxLabelLen  = 63
+	HeaderLen   = 12
+	MaxLabelLen = 63
 
 	Noerror  RCode = 0
 	Formerr        = 1
@@ -83,36 +83,60 @@ const (
 	AdMask     = 0x0020
 	CdMask     = 0x0010
 	RcodeMask  = 0x000f
-
 )
 
-func (h *DNSHeader) SetBit(mask uint16) {
-	h.Second |= mask
+func (h *Header) String() string {
+	line1 := fmt.Sprintf("Header(Id=%04x Fl=%04x QD=%04x AN=%04x NS=%04x AR=%04x\n",
+		h.Id, h.Flags, h.QDCount, h.ANCount, h.NSCount, h.ARCount)
+	line2 := fmt.Sprintf("Qr=%d OpCode=%x Aa=%d Tc=%d Rd=%d Ra=%d Un=%d, Ad=%d Cd=%d Rcode=%d)",
+		h.Bit(QrMask),
+		h.Opcode(),
+		h.Bit(AaMask),
+		h.Bit(TcMask),
+		h.Bit(RdMask),
+		h.Bit(RaMask),
+		h.Bit(UnusedMask),
+		h.Bit(AdMask),
+		h.Bit(CdMask),
+		h.Rcode())
+	return line1 + line2
 }
 
-func (h *DNSHeader) ClearHeaderBit(mask uint16) {
-	h.Second &^= mask
+func (h *Header) SetBit(mask uint16) {
+	h.Flags |= mask
 }
 
-func (h *DNSHeader) SetOpcode(val uint16) {
-	h.Second &^= OpcodeMask
-	h.Second |= OpcodeMask & (val << 11)
+func (h *Header) Bit(mask uint16) int {
+	if h.Flags&mask != 0 {
+		return 1
+	} else {
+		return 0
+	}
 }
 
-func (h *DNSHeader) GetOpcode(val uint16) uint16 {
-	return (h.Second & OpcodeMask) >> 11
+func (h *Header) ClearHeaderBit(mask uint16) {
+	h.Flags &^= mask
 }
 
-func (h *DNSHeader) SetRcode(val RCode) {
-	h.Second &^= RcodeMask
-	h.Second |= (RcodeMask & uint16(val))
+func (h *Header) SetOpcode(val uint16) {
+	h.Flags &^= OpcodeMask
+	h.Flags |= OpcodeMask & (val << 11)
 }
 
-func (h *DNSHeader) GetRcode() RCode {
-	return RCode(h.Second & RcodeMask)
+func (h *Header) Opcode() uint16 {
+	return (h.Flags & OpcodeMask) >> 11
 }
 
-func NewDNSLabel(data string) *Label {
+func (h *Header) SetRcode(val RCode) {
+	h.Flags &^= RcodeMask
+	h.Flags |= (RcodeMask & uint16(val))
+}
+
+func (h *Header) Rcode() RCode {
+	return RCode(h.Flags & RcodeMask)
+}
+
+func NewLabel(data string) *Label {
 
 	if len(data) > MaxLabelLen {
 		return nil
@@ -176,10 +200,10 @@ func (a *Label) String() string {
 	return b.String()
 }
 
-func NewDNSName(labels []string) *Name {
+func NewName(labels []string) *Name {
 	n := new(Name)
 	for _, l := range (labels) {
-		n.Name.PushBack(NewDNSLabel(l))
+		n.Name.PushBack(NewLabel(l))
 	}
 	return n
 }
@@ -209,6 +233,16 @@ func (a *Name) Equals(b *Name) bool {
 	return a.Less(b) || b.Less(a)
 }
 
+func (a *Name) Append(b *Name) {
+	for e := b.Name.Front(); e != nil; e = e.Next() {
+		a.Name.PushBack(e.Value.(*Label))
+	}
+}
+
+func (a *Name) PushBack(l *Label) {
+	a.Name.PushBack(l)
+}
+
 func (a *Name) String() string {
 	if a.Empty() {
 		return "."
@@ -221,10 +255,7 @@ func (a *Name) String() string {
 	return b.String()
 }
 
-func MakeDNSName(str string) *Name {
-	/*if len(str) == 0 {
-		return NewDNSName([]string{})
-	}*/
+func MakeName(str string) *Name {
 	a := strings.Split(str, ".")
 	b := make([]string, 0, len(a))
 	for _, aa := range a {
@@ -232,13 +263,76 @@ func MakeDNSName(str string) *Name {
 			b = append(b, aa)
 		}
 	}
-	return NewDNSName(b)
+	return NewName(b)
 }
 
-func MakeDNSType(str string) Type {
-	switch str {
-	case "A":
-		return A
-	default: panic("NYI")
+var (
+	typemap1 map[string]Type = map[string]Type{
+		"A":      A,
+		"NS":     NS,
+		"CNAME":  CNAME,
+		"SOA":    SOA,
+		"PTR":    PTR,
+		"MX":     MX,
+		"TXT":    TXT,
+		"AAAA":   AAAA,
+		"SRV":    SRV,
+		"NAPTR":  NAPTR,
+		"DS":     DS,
+		"RRSIG":  RRSIG,
+		"NSEC":   NSEC,
+		"DNSKEY": DNSKEY,
+		"NSEC3":  NSEC3,
+		"OPT":    OPT,
+		"IXFR":   IXFR,
+		"AXFR":   AXFR,
+		"ANY":    ANY,
+		"CAA":    CAA,
 	}
+
+	typemap2 map[Type]string
+
+	sectionmap1 map[string]Section = map[string]Section{
+		"Question":   Question,
+		"Answer":     Answer,
+		"Authority":  Authority,
+		"Additional": Additional,
+	}
+
+	sectionmap2 map[Section]string
+)
+
+func init() {
+	typemap2 = make(map[Type]string)
+	for k, v := range (typemap1) {
+		typemap2[v] = k;
+	}
+	sectionmap2 = make(map[Section]string)
+	for k, v := range (sectionmap1) {
+		sectionmap2[v] = k;
+	}
+}
+
+func MakeType(str string) Type {
+	ret := typemap1[str]
+	if ret == 0 {
+		panic("NYI")
+	}
+	return ret
+}
+
+func (t Type) String() string {
+	ret := typemap2[t]
+	if ret == "" {
+		return "UNKNWON"
+	}
+	return ret
+}
+
+func (s Section) String() string {
+	ret := sectionmap2[s]
+	if ret == "" {
+		return "UNKNWON"
+	}
+	return ret
 }

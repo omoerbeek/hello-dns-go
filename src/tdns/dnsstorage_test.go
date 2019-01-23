@@ -3,11 +3,11 @@ package tdns
 import "testing"
 
 func TestDNSLabel(t *testing.T) {
-	l1 := NewDNSLabel("aap")
+	l1 := NewLabel("aap")
 	if l1 == nil {
 		t.Errorf("Label is nil")
 	}
-	l2 := NewDNSLabel("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;lkl;kaaaaaaaap")
+	l2 := NewLabel("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;lkl;kaaaaaaaap")
 	if l2 != nil {
 		t.Error("Label is not nil")
 	}
@@ -15,7 +15,7 @@ func TestDNSLabel(t *testing.T) {
 		t.Error("Label is not nil")
 	}
 
-	l3 := NewDNSLabel("\000123")
+	l3 := NewLabel("\000123")
 	if l3.Len() != 4 {
 		t.Errorf("Length is not 4 but %d", l3.Len())
 	}
@@ -35,8 +35,8 @@ func TestDNSLabel(t *testing.T) {
 	}
 
 	for _, r := range (tests1) {
-		a := NewDNSLabel(r.a)
-		b := NewDNSLabel(r.b);
+		a := NewLabel(r.a)
+		b := NewLabel(r.b);
 		r1 := a.Less(b)
 		r2 := b.Less(a)
 
@@ -51,7 +51,7 @@ func TestDNSLabel(t *testing.T) {
 		{"Donald E. Eastlake 3rd", "Donald\\032E\\.\\032Eastlake\\0323rd"},
 	}
 	for _, r := range (tests2) {
-		a := NewDNSLabel(r.a)
+		a := NewLabel(r.a)
 		b := a.String()
 		if b != r.b {
 			t.Errorf("a: %s got \n'%v' expected \n'%v'", a, b, r.b)
