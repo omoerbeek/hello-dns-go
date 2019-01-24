@@ -34,16 +34,15 @@ var (
 )
 
 type RRec struct {
-	Type tdns.Type
 	Data tdns.RRGen
 }
 
-func resolveName(name *tdns.Name, ip *net.IP, typ tdns.Type) []RRec {
+func resolveName(name *tdns.Name, nsip *net.IP, typ tdns.Type) []RRec {
 	x := make([]RRec, 2)
 	a := tdns.AGen{net.ParseIP("1.2.3.4")}
-	aaaa := tdns.AGen{net.ParseIP("::1")}
-	x[0] = RRec{tdns.A, &a}
-	x[1] = RRec{tdns.A, &aaaa}
+	aaaa := tdns.AAAAGen{net.ParseIP("::1")}
+	x[0] = RRec{&a}
+	x[1] = RRec{&aaaa}
 	return x
 }
 
@@ -51,15 +50,11 @@ func resolveHints() {
 	for name, ip := range hints {
 		rrecs := resolveName(name, &ip, tdns.NS)
 		for _, rrec := range rrecs {
-			switch rrec.Type {
-			case tdns.A:
-				a := rrec.Data.(*tdns.AGen)
+			switch a := rrec.Data.(type) {
+			case *tdns.AGen: 
 				roots[name] = append(roots[name], a.IP)
-				break
-			case tdns.AAAA:
-				a := rrec.Data.(*tdns.AAAAGen)
+			case *tdns.AAAAGen: 
 				roots[name] = append(roots[name], a.IP)
-				break
 			}
 		}
 	}
