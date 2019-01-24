@@ -122,11 +122,11 @@ func (h *Header) SetBit(mask uint16) {
 	h.Flags |= mask
 }
 
-func (h *Header) Bit(mask uint16) int {
+func (h *Header) Bit(mask uint16) bool {
 	if h.Flags&mask != 0 {
-		return 1
+		return true
 	} else {
-		return 0
+		return false
 	}
 }
 

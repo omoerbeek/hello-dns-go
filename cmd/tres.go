@@ -36,10 +36,10 @@ var (
 	roots map[string]map[string]net.IP = make(map[string]map[string]net.IP)
 )
 
-func sendUDPQuery(nsip *net.IP, name *tdns.Name, dnstype tdns.Type) (*tdns.MessageReader, error) {
+func sendUDPQuery(nsip *net.IP, name *tdns.Name, dnstype tdns.Type) (reader *tdns.MessageReader, wrId uint16, err error) {
 	conn, err := net.Dial("udp", nsip.String() + ":53")
 	if err != nil {
-		return nil, err
+		return
 	}
         writer := tdns.NewDNSMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
         writer.DH.SetBit(tdns.RdMask)
@@ -47,7 +47,8 @@ func sendUDPQuery(nsip *net.IP, name *tdns.Name, dnstype tdns.Type) (*tdns.Messa
 
         // Use a good random source out of principle
         r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
-        writer.DH.Id = uint16(r.Int64())
+	wrId = uint16(r.Int64())
+        writer.DH.Id = wrId
 
         msg := writer.Serialize()
         if _, err := conn.Write(msg); err != nil {
@@ -58,24 +59,58 @@ func sendUDPQuery(nsip *net.IP, name *tdns.Name, dnstype tdns.Type) (*tdns.Messa
         data := make([]byte, math.MaxUint16)
         var n int
         if n, err = conn.Read(data); err != nil {
-		return nil, err
+		return
 	}
-	return tdns.NewMessagReader(data, n)
+	reader, err = tdns.NewMessagReader(data, n)
+	return
 }
 
-func resolveName(name *tdns.Name, nsip *net.IP, typ tdns.Type) []tdns.RRec {
-	reader, _ := sendUDPQuery(nsip, name, typ)
-	var rrec *tdns.RRec
-	x := make([]tdns.RRec, 0)
-	for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {	
-		x = append(x, *rrec)
+func resolveName(name *tdns.Name, nsip *net.IP, typ tdns.Type) (ret []tdns.RRec, errr error) {
+	prefix := ""
+	reader, wrId, err := sendUDPQuery(nsip, name, typ)
+	if err != nil {
+		return nil, err
 	}
-	return x
+	for tries := -0; tries < 4; tries++ {
+		// for security reasons, you really need this
+		if reader.DH.Id != wrId {
+			fmt.Printf("%sID mismatch on answer\n");
+			continue
+		}
+		if (!reader.DH.Bit(tdns.QrMask)) {
+			fmt.Printf("%sWhat we received was not a response, ignoring\n");
+			continue
+		}
+		if reader.DH.Rcode() == tdns.Formerr {
+			// XXX this should check that there is no OPT in the response
+			fmt.Printf("%sGot a Formerr, resending without EDNS\n", prefix)
+			// XXX
+			continue
+		}
+		if (reader.DH.Bit(tdns.TcMask)) {
+			fmt.Printf("%sGot a truncated answer, retrying over TCP\n");
+			// XXX
+			continue
+		}
+		ret = make([]tdns.RRec, 0)
+		var rrec *tdns.RRec
+		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {	
+			ret = append(ret, *rrec)
+		}
+		return ret, nil
+	}
+	return nil, nil
 }
 
 func resolveHints() {
+	// We do not explicitly randomize maps, since golang already
+	// does this.
 	for _, ip := range hints {
-		rrecs := resolveName(tdns.MakeName("."), &ip, tdns.NS)
+		fmt.Println("Using hint", ip)
+		rrecs, err := resolveName(tdns.MakeName("."), &ip, tdns.NS)
+		if err != nil {
+			continue;
+		}
 		for _, rrec := range rrecs {
 			key := rrec.Name.String()
 			switch a := rrec.Data.(type) {
@@ -92,6 +127,10 @@ func resolveHints() {
 				key2 := a.IP.String();
 				roots[key][key2] = a.IP
 			}
+		}
+		if len(roots) > 0 {
+			// We found at least one
+			break
 		}
 	}
 }
