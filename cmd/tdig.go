@@ -24,7 +24,7 @@ import (
 	"net"
 	"os"
 
-	"tdns"
+	"github.com/omoerbeek/hello-dns-go/tdns"
 )
 
 func main() {
