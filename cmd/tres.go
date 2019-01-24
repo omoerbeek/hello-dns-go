@@ -23,16 +23,46 @@ import (
 
 	"github.com/omoerbeek/hello-dns-go/tdns"
 )
+
 var (
 	hints = map[*tdns.Name]net.IP{
 		tdns.MakeName("a.root-servers.net"): net.ParseIP("198.41.0.4"),
 		tdns.MakeName("f.root-servers.net"): net.ParseIP("192.5.5.241"),
 		tdns.MakeName("k.root-servers.net"): net.ParseIP("193.0.14.129"),
 	}
-	roots map[*tdns.Name][]net.IP
+	roots map[*tdns.Name][]net.IP = make(map[*tdns.Name][]net.IP)
 )
 
+type RRec struct {
+	Type tdns.Type
+	Data tdns.RRGen
+}
+
+func resolveName(name *tdns.Name, ip *net.IP, typ tdns.Type) []RRec {
+	x := make([]RRec, 2)
+	a := tdns.AGen{net.ParseIP("1.2.3.4")}
+	aaaa := tdns.AGen{net.ParseIP("::1")}
+	x[0] = RRec{tdns.A, &a}
+	x[1] = RRec{tdns.A, &aaaa}
+	return x
+}
+
 func resolveHints() {
+	for name, ip := range hints {
+		rrecs := resolveName(name, &ip, tdns.NS)
+		for _, rrec := range rrecs {
+			switch rrec.Type {
+			case tdns.A:
+				a := rrec.Data.(*tdns.AGen)
+				roots[name] = append(roots[name], a.IP)
+				break
+			case tdns.AAAA:
+				a := rrec.Data.(*tdns.AAAAGen)
+				roots[name] = append(roots[name], a.IP)
+				break
+			}
+		}
+	}
 }
 
 func main() {
@@ -42,6 +72,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "       tres ip:port\n")
 		os.Exit(1)
 	}
-	resolveHints();
+	resolveHints()
+	fmt.Println("Hints resolve to", roots)
 	os.Exit(0)
 }
