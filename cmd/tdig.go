@@ -66,15 +66,12 @@ func main() {
 	}
 
 	reader, err := tdns.NewMessagReader(data, n)
-	fmt.Printf("Read %d bytes %v %v\n", n, reader, err)
+	//fmt.Printf("Read %d bytes %v %v\n", n, reader, err)
 
-	var rrsection tdns.Section
-	var name *tdns.Name
-	var dnstype tdns.Type
-	var ttl uint32
-	var rr tdns.RRGen
-	for reader.GetRR(&rrsection, &name, &dnstype, &ttl, &rr) {
-		fmt.Printf("section=%v name=%v type=%v ttl=%v data=%v\n", rrsection, name, dnstype, ttl, rr)
+	var rrec *tdns.RRec
+	for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+		fmt.Printf("section=%v name=%s type=%v ttl=%v data=%v\n",
+			rrec.Section, rrec.Name.String(), rrec.Type, rrec.TTL, rrec.Data)
 	}
 	os.Exit(0)
 }

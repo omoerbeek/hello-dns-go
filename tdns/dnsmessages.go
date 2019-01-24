@@ -25,7 +25,7 @@ import (
 
 type MessageWriter struct {
 	DH       Header
-	name     *Name
+	name     Name
 	qtype    Type
 	class    Class
 	haveEDNS bool
@@ -40,7 +40,7 @@ func NewDNSMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *Me
 	r.payload = new(bytes.Buffer)
 	r.maxsize = maxsize - HeaderLen;
 	r.payload.Grow(r.maxsize)
-	r.name = name
+	r.name = *name
 	r.qtype = dnstype
 	r.class = class
 	r.resetRRs()
@@ -48,10 +48,9 @@ func NewDNSMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *Me
 }
 
 func (w *MessageWriter) resetRRs() {
-	//w.payload = w.payload[0:0]
 	w.payload.Reset()
 	w.DH.QDCount = 1
-	w.XfrName(w.name, false)
+	w.XfrName(&w.name, false)
 	w.XfrUInt16(uint16(w.qtype))
 	w.XfrUInt16(uint16(w.class))
 }
@@ -125,7 +124,7 @@ func (w *MessageWriter) SetEDNS(newsize int, doBit bool, rcode RCode) {
 
 type MessageReader struct {
 	DH          Header
-	name        *Name
+	name        Name
 	qtype       Type
 	qclass      Class
 	bufsize     uint16
@@ -168,7 +167,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 	r.payload = data[HeaderLen:length]
 
 	if r.DH.QDCount > 0 {
-		r.name = r.getName(nil)
+		r.name = *r.getName(nil)
 		r.qtype = Type(r.getUint16(nil))
 		r.qclass = Class(r.getUint16(nil))
 	}
@@ -206,30 +205,38 @@ func (r *MessageReader) skipRRs(num int) {
 	}
 }
 
+type RRec struct {
+	Section Section
+	Name Name
+	Type Type
+	TTL	uint32
+	Data	RRGen
+}
 
-func (r *MessageReader) GetRR(section *Section, name **Name, dnstype *Type, ttl *uint32, content *RRGen) bool {
+func (r *MessageReader) GetRR() (rrec *RRec) {
 	if r.payloadpos == uint16(len(r.payload)) {
-		return false
+		return nil
 	}
+	rrec = new(RRec)
 	if r.rrpos < r.DH.ANCount {
-		*section = Answer
+		rrec.Section = Answer
 	} else if r.rrpos < r.DH.ANCount + r.DH.NSCount {
-		*section = Authority
+		rrec.Section = Authority
 	} else {
-		*section = Additional
+		rrec.Section = Additional
 	}
 
 	r.rrpos++
 
-	*name = r.getName(nil)
-	*dnstype = Type(r.getUint16(nil))
+	rrec.Name = *r.getName(nil)
+	rrec.Type = Type(r.getUint16(nil))
 	r.getUint16(nil) // class
-	*ttl = r.getUint32(nil)
+	rrec.TTL = r.getUint32(nil)
 	l := r.getUint16(nil)
 	r.endofrecord = r.payloadpos + l
 
 	var result RRGen
-	switch *dnstype {
+	switch rrec.Type {
 	case A:
 		result = new(AGen)
 	case AAAA:
@@ -240,9 +247,9 @@ func (r *MessageReader) GetRR(section *Section, name **Name, dnstype *Type, ttl 
 		result = new(UnknownGen)
 	}
 	result.Gen(r, l)
-	*content = result
+	rrec.Data = result
 
-	return true
+	return rrec
 }
 
 func (r *MessageReader) getUint8(pos *uint16) uint8 {
