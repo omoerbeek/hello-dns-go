@@ -66,7 +66,7 @@ func main() {
 	}
 
 	reader, err := tdns.NewMessagReader(data, n)
-	//fmt.Printf("Read %d bytes %v %v\n", n, reader, err)
+	fmt.Printf("Read %d bytes\n%v\n%v\n", n, reader, err)
 
 	var rrec *tdns.RRec
 	for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
