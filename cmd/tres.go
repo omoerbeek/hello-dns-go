@@ -49,11 +49,11 @@ func NewNameIPSet() NameIPSet {
 func (ips *NameIPSet) String() string {
 	ret := strings.Builder{}
 	count1 := 0
-	for h, i := range (ips.Map) {
+	for h, i := range ips.Map {
 		ret.WriteString(h)
 		ret.WriteString(": [")
 		count2 := 0
-		for _, j := range (i) {
+		for _, j := range i {
 			ret.WriteString(j.String())
 			if count2 < len(i)-1 {
 				ret.WriteString(", ")
@@ -79,7 +79,7 @@ func (ips *NameIPSet) Add(name *tdns.Name, ip *net.IP) {
 }
 
 func (ips *NameIPSet) Size() (sum int) {
-	for _, i := range (ips.Map) {
+	for _, i := range ips.Map {
 		sum += len(i)
 	}
 	return
@@ -91,8 +91,8 @@ type NameIP struct {
 }
 
 func (ips *NameIPSet) RandomizeIPs() (ret []NameIP) {
-	for name, i := range (ips.Map) {
-		for _, anip := range (i) {
+	for name, i := range ips.Map {
+		for _, anip := range i {
 			ret = append(ret, NameIP{name, anip})
 		}
 	}
@@ -161,16 +161,16 @@ func (*DNSResolver) getResponse(nsip *net.IP, name *tdns.Name, dnstype tdns.Type
 	for tries := -0; tries < 4; tries++ {
 
 		writer := tdns.NewDNSMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
-		if (doEDNS) {
+		if doEDNS {
 			writer.DH.SetBit(tdns.RdMask)
 		}
-		writer.SetEDNS(4000, false, tdns.Noerror);
+		writer.SetEDNS(4000, false, tdns.Noerror)
 
 		// Use a good random source out of principle
 		r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
 		writer.DH.Id = uint16(r.Int64())
 
-		if (!doTCP) {
+		if !doTCP {
 			if reader, err = sendUDPQuery(nsip, writer); err != nil {
 				return
 			}
@@ -181,11 +181,11 @@ func (*DNSResolver) getResponse(nsip *net.IP, name *tdns.Name, dnstype tdns.Type
 		}
 		// for security reasons, you really need this
 		if reader.DH.Id != writer.DH.Id {
-			fmt.Printf("%sID mismatch on answer\n");
+			fmt.Printf("%sID mismatch on answer\n")
 			continue
 		}
-		if (reader.DH.Bit(tdns.QrMask) == 0) {
-			fmt.Printf("%sWhat we received was not a response, ignoring\n");
+		if reader.DH.Bit(tdns.QrMask) == 0 {
+			fmt.Printf("%sWhat we received was not a response, ignoring\n")
 			continue
 		}
 		if reader.DH.Rcode() == tdns.Formerr {
@@ -194,8 +194,8 @@ func (*DNSResolver) getResponse(nsip *net.IP, name *tdns.Name, dnstype tdns.Type
 			doEDNS = false
 			continue
 		}
-		if (reader.DH.Bit(tdns.TcMask) == 1) {
-			fmt.Printf("%sGot a truncated answer, retrying over TCP\n");
+		if reader.DH.Bit(tdns.TcMask) == 1 {
+			fmt.Printf("%sGot a truncated answer, retrying over TCP\n")
 			doTCP = true
 			continue
 		}
@@ -215,7 +215,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 
 	servers := mservers.RandomizeIPs()
 
-	for _, server := range (servers) {
+	for _, server := range servers {
 		var newAuth tdns.Name
 
 		fmt.Printf("%sSending to server %s at %s\n", prefix, server.Name, server.IP)
@@ -234,7 +234,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 			continue // see if another server wants to work with us
 		}
 
-		if (reader.DH.Rcode() == tdns.Nxdomain) {
+		if reader.DH.Rcode() == tdns.Nxdomain {
 			fmt.Printf("%sGot an Nxdomain, it does not exist\n", prefix)
 			err = fmt.Errorf("NxDomain error")
 			return
@@ -242,6 +242,9 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 			fmt.Printf("%sAnswer from authoritative server had an error %s\n", prefix, reader.DH.Rcode())
 			err = fmt.Errorf("Answer from authoritative server had an error: %s", reader.DH.Rcode())
 			return
+		}
+		if reader.DH.Bit(tdns.AaMask) == 1 {
+			fmt.Printf("%sAnswer says it is authorative\n", prefix)
 		}
 
 		var nsses = make(map[string]*tdns.Name)
@@ -260,7 +263,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 				} else if name.Equals(&rrec.Name) && rrec.Type == tdns.CNAME {
 					// CNAME handling
 					target := rrec.Data.(*tdns.CNAMEGen).CName
-					ret.Intermediates = append(ret.Intermediates, &tdns.RRec{Name: *name, TTL: rrec.TTL, Data: nil})
+					ret.Intermediates = append(ret.Intermediates, rrec)
 					fmt.Printf("%sWe got a CNAME to %s, chasing\n", prefix, name.String())
 					if target.IsPartOf(auth) {
 						fmt.Printf("%sTarget %s is within %s, harvesting from packet\n", prefix, target, auth)
@@ -268,14 +271,14 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
 							if rrec.Section == tdns.Answer && rrec.Name.Equals(target) && rrec.Type == dnstype {
 								hadMatch = true
-								ret.Res = append(ret.Res, &tdns.RRec{Name: *name, TTL: rrec.TTL, Data: nil})
+								ret.Res = append(ret.Res, rrec)
 							}
 						}
 						if hadMatch {
-							fmt.Printf("%sIn-message chase worked, we're done\n", prefix);
+							fmt.Printf("%sIn-message chase worked, we're done\n", prefix)
 							return
 						} else {
-							fmt.Printf("%sIn-message chase not succesful, will do new query for %s\n", prefix, target);
+							fmt.Printf("%sIn-message chase not succesful, will do new query for %s\n", prefix, target)
 						}
 					}
 
@@ -283,7 +286,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 					chaseres, err = resolver.resolveAt(target, dnstype, depth+1, tdns.MakeName(""), &roots)
 					if err == nil {
 						ret.Res = chaseres.Res
-						for _, i := range (chaseres.Intermediates) {
+						for _, i := range chaseres.Intermediates {
 							ret.Intermediates = append(ret.Intermediates, i)
 						}
 					}
@@ -316,15 +319,14 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 
 		}
 		if len(ret.Res) > 0 {
-			fmt.Printf("%sDone, returning %d results, %d intermediate\n", prefix, len(ret.Res), len(ret.Intermediates));
-			return;
-		}
-
-		if reader.DH.Bit(tdns.AaMask) == 1{
+			fmt.Printf("%sDone, returning %d results, %d intermediate\n", prefix, len(ret.Res), len(ret.Intermediates))
+			return
+		} else if reader.DH.Bit(tdns.AaMask) == 1 {
 			fmt.Printf("%sNo data response\n", prefix)
 			err = fmt.Errorf("Nodata Exception")
 			return
 		}
+
 		fmt.Printf("%sWe got delegated to %d %s nameserver names\n", prefix, len(nsses), newAuth.String())
 		numa := addresses.Size()
 		if numa > 0 {
@@ -343,7 +345,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 		// to get addresses for the rest
 		fmt.Printf("%sDon't have a resolved nameserver to ask anymore, trying to resolve %d names\n", prefix, len(nsses))
 		var rnsses []tdns.Name
-		for _, n := range (nsses) {
+		for _, n := range nsses {
 			rnsses = append(rnsses, *n)
 		}
 		mrand.Shuffle(len(rnsses), func(i, j int) {
@@ -356,7 +358,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 				fmt.Printf("%sAttempting to resolve NS %s|%s\n", prefix, n.String(), t)
 				result, err := resolver.resolveAt(&n, t, depth+1, tdns.MakeName(""), &roots)
 				if err != nil {
-					fmt.Printf("%Failed to resolve name for %s %s: %s, trying next server (if there)\n", n, t, err)
+					fmt.Printf("%sFailed to resolve name for %s %s: %s, trying next server (if there)\n", prefix, n, t, err)
 					continue
 				}
 				fmt.Printf("%sGot %d nameserver %s addresses, adding to list\n", prefix, len(result.Res), t)
@@ -369,13 +371,17 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 					}
 				}
 				if newns.Size() == 0 {
-					fmt.Printf("%Failed to resolve name for %s %s\n", n, t)
+					fmt.Printf("%sFailed to resolve name for %s %s\n", prefix, n, t)
 					continue
 				}
 				res2, err := resolver.resolveAt(name, dnstype, depth+1, &newAuth, &newns)
 				if err != nil {
-					fmt.Printf("%Failed to resolve name for %s %s trying next server (if there)\n", n, t, err)
-					continue
+					if err.Error() != "Nodata Exception" {
+						fmt.Printf("%sFailed to resolve name for %s %s trying next server (if there)\n", server, n, t, err)
+						continue
+					} else {
+						return res2, err
+					}
 				}
 				if len(res2.Res) > 0 {
 					return res2, nil
@@ -396,7 +402,7 @@ func resolveHints() {
 		fmt.Println("Using hint", ip)
 		reader, err := empty.getResponse(&ip, tdns.MakeName("."), tdns.NS, 0)
 		if err != nil {
-			continue;
+			continue
 		}
 		var rrec *tdns.RRec
 		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
@@ -434,7 +440,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	for _, r := range (res.Res) {
+	for _, r := range res.Res {
 		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
 	}
 	os.Exit(0)
