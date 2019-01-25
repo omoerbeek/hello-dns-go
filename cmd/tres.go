@@ -273,20 +273,21 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						}
 						if hadMatch {
 							fmt.Printf("%sIn-message chase worked, we're done\n", prefix);
+							return
 						} else {
 							fmt.Printf("%sIn-message chase not succesful, will do new query for %s\n", prefix, target);
 						}
-
-						var chaseres ResolveResult
-						chaseres, err = resolver.resolveAt(target, dnstype, depth+1, tdns.MakeName(""), &roots)
-						if err == nil {
-							ret.Res = chaseres.Res
-							for _, i := range (chaseres.Intermediates) {
-								ret.Intermediates = append(ret.Intermediates, i)
-							}
-						}
-						return
 					}
+
+					var chaseres ResolveResult
+					chaseres, err = resolver.resolveAt(target, dnstype, depth+1, tdns.MakeName(""), &roots)
+					if err == nil {
+						ret.Res = chaseres.Res
+						for _, i := range (chaseres.Intermediates) {
+							ret.Intermediates = append(ret.Intermediates, i)
+						}
+					}
+					return
 				}
 			} else {
 				// Not authorative answer, pick up nameservers. We check if glue records are within the authority
@@ -296,7 +297,6 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						nsname := rrec.Data.(*tdns.NSGen).NSName
 						nsses[nsname.String()] = nsname
 						newAuth = rrec.Name
-						fmt.Printf("XXX %s %s %v\n", name.String(), rrec.Name.String(), name.IsPartOf(&rrec.Name))
 					} else {
 						fmt.Printf("%sAuthoritative server gave us NS record to which this query does not belong\n", prefix)
 					}
@@ -308,11 +308,8 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						case *tdns.AAAAGen:
 							addresses.Add(&rrec.Name, &a.IP)
 						}
-						fmt.Printf("YYY%s %s %v\n", rrec.Name.String(), auth.String(), rrec.Name.IsPartOf(auth))
 					} else {
-						fmt.Printf("ZZZ%s %s %v %v\n", rrec.Name.String(), auth.String(), nsses[rrec.Name.String()] != nil, rrec.Name.IsPartOf(auth))
 						fmt.Printf("%sNot accepting IP address of %s: out of authority of this server\n", prefix, rrec.Name.String())
-						os.Exit(1)
 					}
 				}
 			}
@@ -324,7 +321,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 		}
 
 		if reader.DH.Bit(tdns.AaMask) == 1{
-			fmt.Printf("%sNo data response", prefix)
+			fmt.Printf("%sNo data response\n", prefix)
 			err = fmt.Errorf("Nodata Exception")
 			return
 		}
