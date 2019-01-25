@@ -122,11 +122,11 @@ func (h *Header) SetBit(mask uint16) {
 	h.Flags |= mask
 }
 
-func (h *Header) Bit(mask uint16) bool {
+func (h *Header) Bit(mask uint16) int {
 	if h.Flags&mask != 0 {
-		return true
+		return 1
 	} else {
-		return false
+		return 0
 	}
 }
 
@@ -198,7 +198,7 @@ func (a *Label) Less(b *Label) bool {
 }
 
 func (a *Label) Equals(b *Label) bool {
-	return a.Less(b) || b.Less(a)
+	return !a.Less(b) && !b.Less(a)
 }
 
 func (a *Label) String() string {
@@ -260,7 +260,6 @@ func (a *Name) PushBack(l *Label) {
 }
 
 func (n *Name) IsPartOf(root *Name) bool {
-	return true
 	r := root.Name.Back();
 	us := n.Name.Back();
 	for {

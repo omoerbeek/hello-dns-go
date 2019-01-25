@@ -48,6 +48,7 @@ func TestDNSLabel(t *testing.T) {
 		{"POWER", "power1", true, false},
 		{"", "", false, false},
 		{"nl", "com", false, true},
+		{"aap", "aap", false, false},
 	}
 
 	for _, r := range (tests1) {
@@ -73,17 +74,35 @@ func TestDNSLabel(t *testing.T) {
 			t.Errorf("a: %s got \n'%v' expected \n'%v'", a, b, r.b)
 		}
 	}
+
+	tests3 := []struct {
+		a, b string
+		r bool
+	}{
+		{"aap", "aap", true},
+	}
+	for _, r := range (tests3) {
+		a := NewLabel(r.a)
+		b := NewLabel(r.b)
+		tt := a.Equals(b)
+		if r.r != tt {
+			t.Errorf("%s %s got %v expected %v", a, b, r, r.r)
+		}
+	}
+
+
+
 }
 
-func TestDNSName(t *testing.T) {
+func TestName(t *testing.T) {
 	tests1 := []struct {
 		name *Name
 		str  string
 	}{
-		{NewDNSName([]string{}), "."},
-		{NewDNSName([]string{"www", "powerdns", "com"}), "www.powerdns.com."},
-		{NewDNSName([]string{"powerdns", "com."}), "powerdns.com\\.."},
-		{NewDNSName([]string{"p\x00werdns", "com"}), "p\\000werdns.com."},
+		{NewName([]string{}), "."},
+		{NewName([]string{"www", "powerdns", "com"}), "www.powerdns.com."},
+		{NewName([]string{"powerdns", "com."}), "powerdns.com\\.."},
+		{NewName([]string{"p\x00werdns", "com"}), "p\\000werdns.com."},
 	}
 
 	for _, x := range (tests1) {
@@ -98,11 +117,11 @@ func TestDNSName(t *testing.T) {
 		a, b *Name
 		x, y bool
 	}{
-		{NewDNSName([]string{}), NewDNSName([]string{}), false, false},
-		{NewDNSName([]string{"aap", "nl"}), NewDNSName([]string{"aap", "com"}), false, true},
-		{NewDNSName([]string{"AAP", "NL"}), NewDNSName([]string{"Aap", "nl"}), false, false},
-		{NewDNSName([]string{"nl"}), NewDNSName([]string{"0", "nl"}), false, true},
-		{NewDNSName([]string{"0", "nl"}), NewDNSName([]string{"0", "nl", "com"}), true, false},
+		{NewName([]string{}), NewName([]string{}), false, false},
+		{NewName([]string{"aap", "nl"}), NewName([]string{"aap", "com"}), false, true},
+		{NewName([]string{"AAP", "NL"}), NewName([]string{"Aap", "nl"}), false, false},
+		{NewName([]string{"nl"}), NewName([]string{"0", "nl"}), false, true},
+		{NewName([]string{"0", "nl"}), NewName([]string{"0", "nl", "com"}), true, false},
 	}
 
 	for _, tt := range (tests2) {
@@ -114,17 +133,38 @@ func TestDNSName(t *testing.T) {
 		}
 	}
 
+	tests3 := []struct {
+		a, b *Name
+		x bool
+	}{
+		{NewName([]string{}), NewName([]string{}), true},
+		{NewName([]string{"aap", "nl"}), NewName([]string{"aap", "com"}), false},
+		{NewName([]string{"AAP", "NL"}), NewName([]string{"Aap", "nl"}), true},
+		{NewName([]string{"nl"}), NewName([]string{"0", "nl"}), false},
+		{NewName([]string{"0", "nl"}), NewName([]string{ "nl"}), true},
+		{NewName([]string{"ns", "aap", "nl"}), NewName([]string{"aap", "nl"}), true},
+	}
+
+	for _, tt := range (tests3) {
+		r1 := tt.a.IsPartOf(tt.b)
+
+		if r1 != tt.x  {
+			t.Errorf("a: %s, b: %s got %v expected %v", tt.a, tt.b, r1, tt.x)
+		}
+	}
+
+
 }
 
-func TestMakeDNSName(t *testing.T) {
+func TestMakeName(t *testing.T) {
 	tests1 := []struct {
 		name *Name
 		str  string
 	}{
-		{MakeDNSName(""), "."},
-		{MakeDNSName("."), "."},
-		{MakeDNSName("aa.bb.cc"), "aa.bb.cc."},
-		{MakeDNSName("aa..bb.cc"), "aa.bb.cc."}, // XXX correct?
+		{MakeName(""), "."},
+		{MakeName("."), "."},
+		{MakeName("aa.bb.cc"), "aa.bb.cc."},
+		{MakeName("aa..bb.cc"), "aa.bb.cc."}, // XXX correct?
 	}
 
 	for _, x := range (tests1) {
