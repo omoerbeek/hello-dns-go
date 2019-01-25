@@ -17,15 +17,21 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
-	"net"
-	"os"
 	"math"
 	"math/big"
-	"crypto/rand"
+	mrand "math/rand"
+	"net"
+	"os"
+	"strings"
 
 	"github.com/omoerbeek/hello-dns-go/tdns"
 )
+
+type NameIPSet struct {
+	Map map[string]map[string]*net.IP
+}
 
 var (
 	hints = map[string]net.IP{
@@ -33,47 +39,153 @@ var (
 		"f.root-servers.net": net.ParseIP("192.5.5.241"),
 		"k.root-servers.net": net.ParseIP("193.0.14.129"),
 	}
-	roots map[string]map[string]net.IP = make(map[string]map[string]net.IP)
+	roots NameIPSet = NewNameIPSet()
 )
 
-func sendUDPQuery(nsip *net.IP, name *tdns.Name, dnstype tdns.Type) (reader *tdns.MessageReader, wrId uint16, err error) {
-	conn, err := net.Dial("udp", nsip.String() + ":53")
+
+func NewNameIPSet() NameIPSet {
+	return NameIPSet{make(map[string]map[string]*net.IP)}
+}
+
+func (ips *NameIPSet) String() string {
+	ret := strings.Builder{}
+	count1 := 0
+	for h, i := range (ips.Map) {
+		ret.WriteString(h)
+		ret.WriteString(": [")
+		count2 := 0
+		for _, j := range (i) {
+			ret.WriteString(j.String())
+			if count2 < len(i)-1 {
+				ret.WriteString(", ")
+			}
+			count2++
+		}
+		ret.WriteString("]")
+		if count1 < len(ips.Map) -1 {
+			ret.WriteString(", ")
+		}
+		count1++
+	}
+	return ret.String()
+}
+
+
+func (ips *NameIPSet) Add(name *tdns.Name, ip *net.IP) {
+	key1 := name.String()
+	key2 := ip.String()
+	if ips.Map[key1] == nil {
+		ips.Map[key1] = make(map[string]*net.IP)
+	}
+	ips.Map[key1][key2] = ip
+}
+
+func (ips *NameIPSet) Size() (sum int) {
+	for _, i := range(ips.Map) {
+		sum += len(i)
+	}
+	return
+}
+
+type NameIP struct {
+	Name string
+	IP *net.IP
+}
+
+func (ips *NameIPSet) RandomizeIPs() (ret []NameIP) {
+	for name, i := range(ips.Map) {
+		for _, anip := range(i) {
+			ret = append(ret, NameIP{name, anip})
+		}
+	}
+	mrand.Shuffle(len(ret), func(i, j int) {
+		ret[i], ret[j] = ret[j], ret[i]
+	})
+	return
+}
+
+
+
+func sendUDPQuery(nsip *net.IP, writer *tdns.MessageWriter) (reader *tdns.MessageReader, err error) {
+	address := net.UDPAddr{IP:*nsip, Port: 53}
+	conn, err := net.DialUDP("udp", nil, &address)
 	if err != nil {
 		return
 	}
-        writer := tdns.NewDNSMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
-        writer.DH.SetBit(tdns.RdMask)
-        writer.SetEDNS(4000, false, tdns.Noerror);
+	defer conn.Close()
 
-        // Use a good random source out of principle
-        r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
-	wrId = uint16(r.Int64())
-        writer.DH.Id = wrId
+	msg := writer.Serialize()
+	if _, err = conn.Write(msg); err != nil {
+		fmt.Fprintf(os.Stderr, "Could not write query: %s\n", err)
+		return
+	}
 
-        msg := writer.Serialize()
-        if _, err := conn.Write(msg); err != nil {
-                fmt.Fprintf(os.Stderr, "Could not write query: %s\n", err)
-                os.Exit(1)
-        }
-
-        data := make([]byte, math.MaxUint16)
-        var n int
-        if n, err = conn.Read(data); err != nil {
+	data := make([]byte, math.MaxUint16)
+	var n int
+	if n, err = conn.Read(data); err != nil {
 		return
 	}
 	reader, err = tdns.NewMessagReader(data, n)
 	return
 }
 
-func resolveName(name *tdns.Name, nsip *net.IP, typ tdns.Type) (ret []tdns.RRec, errr error) {
-	prefix := ""
-	reader, wrId, err := sendUDPQuery(nsip, name, typ)
+func sendTCPQuery(nsip *net.IP, writer *tdns.MessageWriter) (reader *tdns.MessageReader, err error) {
+	address := net.TCPAddr{IP:*nsip, Port: 53}
+	conn, err := net.DialTCP("tcp", nil, &address)
 	if err != nil {
-		return nil, err
+		return
 	}
+	defer conn.Close()
+
+	msg := writer.Serialize()
+	if _, err = conn.Write(msg); err != nil {
+		fmt.Fprintf(os.Stderr, "Could not write query: %s\n", err)
+		return
+	}
+
+	data := make([]byte, math.MaxUint16)
+	var n int
+	if n, err = conn.Read(data); err != nil {
+		return
+	}
+	reader, err = tdns.NewMessagReader(data, n)
+	return
+}
+
+type DNSResolver struct {
+	myroots NameIPSet
+}
+
+
+func (*DNSResolver) getResponse(nsip *net.IP, name *tdns.Name, dnstype tdns.Type, depth int) (reader *tdns.MessageReader, err error) {
+	prefix := strings.Repeat(" ", depth)
+
+	doTCP := false
+	doEDNS := true
+
 	for tries := -0; tries < 4; tries++ {
+
+		writer := tdns.NewDNSMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
+		if (doEDNS) {
+			writer.DH.SetBit(tdns.RdMask)
+		}
+		writer.SetEDNS(4000, false, tdns.Noerror);
+
+		// Use a good random source out of principle
+		r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
+		writer.DH.Id = uint16(r.Int64())
+
+		if (!doTCP) {
+			if reader, err = sendUDPQuery(nsip, writer); err != nil {
+				return
+			}
+		} else {
+			if reader, err = sendTCPQuery(nsip, writer); err != nil {
+				return
+			}
+		}
 		// for security reasons, you really need this
-		if reader.DH.Id != wrId {
+		if reader.DH.Id != writer.DH.Id  {
 			fmt.Printf("%sID mismatch on answer\n");
 			continue
 		}
@@ -84,51 +196,179 @@ func resolveName(name *tdns.Name, nsip *net.IP, typ tdns.Type) (ret []tdns.RRec,
 		if reader.DH.Rcode() == tdns.Formerr {
 			// XXX this should check that there is no OPT in the response
 			fmt.Printf("%sGot a Formerr, resending without EDNS\n", prefix)
-			// XXX
+			doEDNS = false
 			continue
 		}
 		if (reader.DH.Bit(tdns.TcMask)) {
 			fmt.Printf("%sGot a truncated answer, retrying over TCP\n");
-			// XXX
+			doTCP = true
 			continue
 		}
-		ret = make([]tdns.RRec, 0)
-		var rrec *tdns.RRec
-		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {	
-			ret = append(ret, *rrec)
-		}
-		return ret, nil
+		return
 	}
-	return nil, nil
+	return
+}
+
+type ResolveResult struct {
+	Res []*tdns.RRec
+	Intermediates  []*tdns.RRec
+	Data *tdns.RRGen
+}
+
+func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret ResolveResult, err error) {
+	prefix := fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
+	fmt.Printf("%sStarting query at authority = %s, have %d addresses to try\n", prefix, auth, mservers.Size())
+
+	servers := mservers.RandomizeIPs()
+
+	for _, server := range(servers) {
+		var newAuth tdns.Name
+
+		fmt.Printf("%sSending to server %s at %s\n", prefix, server.Name, server.IP)
+
+		var reader *tdns.MessageReader
+
+		reader, err = resolver.getResponse(server.IP, name, dnstype, depth)
+		if err != nil{
+			fmt.Printf("%sError resolving: %s\n", prefix, err)
+			continue
+		}
+
+
+		if !reader.Name.Equals(name) || reader.Type != dnstype {
+			fmt.Printf("%sGot a response %s to a different question %s or different %s %s type than we asked for!\n",
+				prefix, reader.Name.String(), name.String(), reader.Type, dnstype)
+			continue // see if another server wants to work with us
+		}
+
+		if (reader.DH.Rcode() == tdns.Nxdomain) {
+			fmt.Printf("%sGot an Nxdomain, it does not exist\n", prefix)
+			err = nil // XXX
+			return
+		} else if reader.DH.Rcode() != tdns.Noerror {
+			fmt.Printf("%sAnswer from authoritative server had an error %s\n", prefix, reader.DH.Rcode())
+			err = nil // XXX
+			return
+		}
+
+		var nsses = make(map[string]*tdns.Name)
+		var addresses = NewNameIPSet()
+
+		var rrec *tdns.RRec
+		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+			fmt.Printf("%s%v %s IN %v ttl=%v %v\n",
+				prefix, rrec.Section, rrec.Name.String(), rrec.Type, rrec.TTL, rrec.Data)
+
+			if reader.DH.Bit(tdns.AaMask) {
+				// Authoritative answer. We trust this.
+				if rrec.Section == tdns.Answer && name.Equals(&rrec.Name) && dnstype == rrec.Type {
+					fmt.Printf("%sWe got an answer to our question!\n", prefix)
+					ret.Res = append(ret.Res, rrec)
+				} else if name.Equals(&rrec.Name) && rrec.Type == tdns.CNAME {
+					// CNAME handling
+					target := rrec.Data.(*tdns.CNAMEGen).CName
+					ret.Intermediates = append(ret.Intermediates, &tdns.RRec{Name: *name, TTL: rrec.TTL, Data: nil})
+					fmt.Printf("%sWe got a CNAME to %s, chasing\n", prefix, name.String())
+					if target.IsPartOf(auth) {
+						fmt.Printf("%sTarget %s is within %s, harvesting from packet\n", prefix, target, auth)
+						hadMatch := false
+						for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+							if rrec.Section == tdns.Answer && rrec.Name.Equals(target) && rrec.Type == dnstype {
+								hadMatch = true
+								ret.Res = append(ret.Res, &tdns.RRec{Name: *name, TTL: rrec.TTL, Data: nil})
+							}
+						}
+						if hadMatch {
+							fmt.Printf("%sIn-message chase worked, we're done\n", prefix);
+						} else {
+							fmt.Printf("%sIn-message chase not succesful, will do new query for %s\n", prefix, target);
+						}
+
+						chaseres, err := resolver.resolveAt(target, dnstype, depth + 1, tdns.MakeName(""), &roots)
+						ret.Res = chaseres.Res
+						for _, i := range(chaseres.Intermediates) {
+							ret.Intermediates = append(ret.Intermediates, i)
+						}
+						return ret, err;
+					}
+				}
+			} else {
+				// Not authorative answer, pick up nameservers. We check if glue records are within the authority
+				// of what we approached this server for.
+				if rrec.Section == tdns.Authority && rrec.Type == tdns.NS {
+					if name.IsPartOf(&rrec.Name) {
+						nsname := rrec.Data.(*tdns.NSGen).NSName
+						//if !reader.DH.Bit(tdns.AaMask) || (!newAuth.Equals(&rrec.Name) && len(nsses) == 0 {
+						//}
+						nsses[nsname.String()] = nsname
+						newAuth = rrec.Name
+					} else {
+				 		fmt.Printf("%sAuthoritative server gave us NS record to which this query does not belong\n", prefix)
+					}
+				} else if rrec.Section == tdns.Additional && nsses[rrec.Name.String()] != nil {
+					if rrec.Name.IsPartOf(auth) {
+						switch a := rrec.Data.(type) {
+						case *tdns.AGen:
+							addresses.Add(&rrec.Name, &a.IP)
+						case *tdns.AAAAGen:
+							addresses.Add(&rrec.Name, &a.IP)
+						}
+					} else {
+						fmt.Printf("%sNot accepting IP address of %s: out of authority of this server\n", prefix, rrec.Name)
+					}
+				}
+			}
+
+		}
+		if len(ret.Res) > 0 {
+			fmt.Printf("%sDone, returning %d results, %d intermediate\n", prefix, len(ret.Res), len(ret.Intermediates));
+			return;
+		}
+
+		if reader.DH.Bit(tdns.AaMask) {
+			fmt.Printf("%sNo data response", prefix)
+			err = nil // XXX
+			return
+		}
+		fmt.Printf("%sWe got delegated to %d %s nameserver names\n", prefix, len(nsses), newAuth.String())
+		numa := addresses.Size()
+		if numa > 0 {
+			fmt.Printf("%sWe have %d addresses to iterate to: %s\n", prefix, numa, addresses.String())
+			res2, err := resolver.resolveAt(name, dnstype, depth+1, &newAuth, &addresses)
+			if len(res2.Res) > 0 {
+				return res2, err
+			}
+			fmt.Printf("%sThe IP addresses we had dit not provide a good answer\n", prefix)
+
+		}
+		// well we could not make it work using the servers we had addresses for. Let's try
+		// to get addresses for the rest
+		fmt.Printf("%sDon't have a resolved nameserver to ask anymore, trying to resolve %d names\n", len(nsses))
+		//
+	}
+	return
 }
 
 func resolveHints() {
 	// We do not explicitly randomize maps, since golang already
 	// does this.
+	empty := DNSResolver{}
 	for _, ip := range hints {
 		fmt.Println("Using hint", ip)
-		rrecs, err := resolveName(tdns.MakeName("."), &ip, tdns.NS)
+		reader, err := empty.getResponse(&ip, tdns.MakeName("."), tdns.NS, 0)
 		if err != nil {
 			continue;
 		}
-		for _, rrec := range rrecs {
-			key := rrec.Name.String()
+		var rrec *tdns.RRec
+		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
 			switch a := rrec.Data.(type) {
-			case *tdns.AGen: 
-				if roots[key] == nil {
-					roots[key] = make(map[string]net.IP)
-				}
-				key2 := a.IP.String();
-				roots[key][key2] = a.IP
-			case *tdns.AAAAGen: 
-				if roots[key] == nil {
-					roots[key] = make(map[string]net.IP)
-				}
-				key2 := a.IP.String();
-				roots[key][key2] = a.IP
+			case *tdns.AGen:
+				roots.Add(&rrec.Name, &a.IP)
+			case *tdns.AAAAGen:
+				roots.Add(&rrec.Name, &a.IP)
 			}
 		}
-		if len(roots) > 0 {
+		if len(roots.Map) > 0 {
 			// We found at least one
 			break
 		}
@@ -137,12 +377,26 @@ func resolveHints() {
 
 func main() {
 	args := os.Args
-	if len(args) != 2 && len(args) != 3 {
+	if len(args) != 3 {
 		fmt.Fprintf(os.Stderr, "Usage: tres name type\n")
-		fmt.Fprintf(os.Stderr, "       tres ip:port\n")
+		//fmt.Fprintf(os.Stderr, "       tres ip:port\n")
 		os.Exit(1)
 	}
 	resolveHints()
-	fmt.Println("Hints resolve to", roots)
+	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
+
+	dn := tdns.MakeName(args[1])
+	dt := tdns.MakeType(args[2])
+
+	resolver := DNSResolver{roots}
+	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots)
+
+	if err != nil {
+		fmt.Println("Error", err)
+		os.Exit(1)
+	}
+	for _, r := range(res.Res) {
+		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+	}
 	os.Exit(0)
 }

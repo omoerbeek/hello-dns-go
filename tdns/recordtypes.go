@@ -74,3 +74,15 @@ func (a *NSGen) Gen(r * MessageReader, l uint16) {
 func (a *NSGen) String() string {
 	return a.NSName.String()
 }
+
+type CNAMEGen struct {
+	CName *Name
+}
+
+func (a *CNAMEGen) Gen(r * MessageReader, l uint16) {
+	a.CName = r.getName(nil)
+}
+
+func (a *CNAMEGen) String() string {
+	return a.CName.String()
+}

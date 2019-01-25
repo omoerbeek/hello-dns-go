@@ -95,7 +95,7 @@ func (w *MessageWriter) putEDNS(bufsize int, ercode RCode, doBit bool) bool {
 	available := w.maxsize - w.payload.Len()
 	if (available >= 11) {
 		w.XfrUInt8(0)
-		w.XfrUInt16(OPT) // 'root' name, our type
+		w.XfrUInt16(OPT) // 'root' Name, our type
 		w.XfrUInt16(uint16(bufsize))
 		w.XfrUInt8(uint8(ercode) >> 4)
 		w.XfrUInt8(0)
@@ -124,16 +124,16 @@ func (w *MessageWriter) SetEDNS(newsize int, doBit bool, rcode RCode) {
 
 type MessageReader struct {
 	DH          Header
-	name        Name
-	qtype       Type
-	qclass      Class
+	Name        Name
+	Type        Type
+	Class       Class
 	bufsize     uint16
 	doBit       bool
 	ednsVersion uint8
 	haveEDNS    bool
 	payload     []byte
 	payloadpos  uint16
-	rrpos		uint16
+	rrpos       uint16
 	endofrecord uint16 // needed?
 }
 
@@ -167,9 +167,9 @@ func (r *MessageReader) Read(data []byte, length int) error {
 	r.payload = data[HeaderLen:length]
 
 	if r.DH.QDCount > 0 {
-		r.name = *r.getName(nil)
-		r.qtype = Type(r.getUint16(nil))
-		r.qclass = Class(r.getUint16(nil))
+		r.Name = *r.getName(nil)
+		r.Type = Type(r.getUint16(nil))
+		r.Class = Class(r.getUint16(nil))
 	}
 
 	if r.DH.ARCount > 0 {
@@ -243,6 +243,8 @@ func (r *MessageReader) GetRR() (rrec *RRec) {
 		result = new(AAAAGen)
 	case NS:
 		result = new(NSGen)
+	case CNAME:
+		result = new(CNAMEGen)
 	default:
 		result = new(UnknownGen)
 	}

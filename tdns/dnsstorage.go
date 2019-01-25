@@ -246,7 +246,7 @@ func (a *Name) Less(b *Name) bool {
 }
 
 func (a *Name) Equals(b *Name) bool {
-	return a.Less(b) || b.Less(a)
+	return !a.Less(b) && !b.Less(a)
 }
 
 func (a *Name) Append(b *Name) {
@@ -257,6 +257,29 @@ func (a *Name) Append(b *Name) {
 
 func (a *Name) PushBack(l *Label) {
 	a.Name.PushBack(l)
+}
+
+func (n *Name) IsPartOf(root *Name) bool {
+	return true
+	r := root.Name.Back();
+	us := n.Name.Back();
+	for {
+		if r == nil {
+			return true
+		}
+		if us == nil {
+			return false;
+		}
+		usValue := us.Value.(*Label)
+		themValue := r.Value.(*Label)
+
+		if usValue.Equals(themValue) {
+			r = r.Prev()
+			us = us.Prev()
+		} else {
+			return false
+		}
+	}
 }
 
 func (a *Name) String() string {
