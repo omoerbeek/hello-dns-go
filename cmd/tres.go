@@ -26,6 +26,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/omoerbeek/hello-dns-go/tdns"
 )
@@ -143,6 +144,7 @@ func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 
 	data := make([]byte, res.DNSBufSize)
 	var n int
+	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 	if n, err = conn.Read(data); err != nil {
 		return
 	}
@@ -152,14 +154,17 @@ func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 
 func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader *tdns.MessageReader, err error) {
 	address := net.TCPAddr{IP: nsip, Port: 53}
-	conn, err := net.DialTCP("tcp", nil, &address)
+	dialer := net.Dialer{Timeout: 1 * time.Second}
+	conn, err := dialer.Dial("tcp", address.String())
+	//conn, err := net.DialTCP("tcp", nil, &address)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
-	conn.SetNoDelay(true);
+	conn.(*net.TCPConn).SetNoDelay(true);
 
 	msg := writer.Serialize()
+	conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
 	if err = binary.Write(conn, binary.BigEndian, uint16(len(msg))); err != nil {
 		return
 	}
@@ -174,6 +179,7 @@ func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	}
 	data := make([]byte, l)
 	var n int
+	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 	if n, err = conn.Read(data); err != nil {
 		return
 	}
@@ -185,13 +191,12 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 	prefix := strings.Repeat(" ", depth)
 
 	doTCP := false
-	doEDNS := false
+	doEDNS := true
 
 	for tries := 0; tries < 4; tries++ {
 
 		writer := tdns.NewDNSMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
 
-		//writer.DH.SetBit(tdns.RdMask)
 		if (doEDNS) {
 			writer.SetEDNS(res.DNSBufSize, false, tdns.Noerror)
 		}
@@ -466,11 +471,15 @@ func main() {
 	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots)
 
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Error result for %s %s: %s\n", args[1], args[2], err)
 		os.Exit(1)
 	}
-	for _, r := range res.Res {
-		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+	if len(res.Res) == 0 {
+			fmt.Printf("No data for %s %s\n", args[1], args[2])
+	} else {
+		for _, r := range res.Res {
+			fmt.Printf("Resolved %s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+		}
 	}
 	os.Exit(0)
 }
