@@ -379,7 +379,7 @@ func MakeType(str string) Type {
 func (t Type) String() string {
 	ret := typemap2[t]
 	if ret == "" {
-		return "UNKNWON"
+		return fmt.Sprintf("%#x", t)
 	}
 	return ret
 }
@@ -387,15 +387,15 @@ func (t Type) String() string {
 func (s Section) String() string {
 	ret := sectionmap2[s]
 	if ret == "" {
-		return "UNKNWON"
+		return fmt.Sprintf("%#x", s)
 	}
 	return ret
 }
 
-func (s RCode) String() string {
-	ret := rcodemap2[s]
+func (r RCode) String() string {
+	ret := rcodemap2[r]
 	if ret == "" {
-		return "UNKNWON"
+		return fmt.Sprintf("%#x", r)
 	}
 	return ret
 }
