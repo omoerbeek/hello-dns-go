@@ -50,8 +50,8 @@ type (
 		Intermediates []*tdns.RRec
 	}
 
-	NxdomainError struct {}
-	NodataError struct {}
+	NxdomainError struct{}
+	NodataError   struct{}
 )
 
 var (
@@ -70,7 +70,6 @@ func (NxdomainError) Error() string {
 func (NodataError) Error() string {
 	return "Nodata"
 }
-
 
 func NewNameIPSet() NameIPSet {
 	return NameIPSet{make(map[string]map[string]net.IP)}
@@ -161,7 +160,7 @@ func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 		return
 	}
 	defer conn.Close()
-	conn.(*net.TCPConn).SetNoDelay(true);
+	conn.(*net.TCPConn).SetNoDelay(true)
 
 	msg := writer.Serialize()
 	conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
@@ -197,7 +196,7 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 
 		writer := tdns.NewMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
 
-		if (doEDNS) {
+		if doEDNS {
 			writer.SetEDNS(res.DNSBufSize, false, tdns.Noerror)
 		}
 
@@ -431,7 +430,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 func resolveHints() {
 	// We do not explicitly randomize maps, since golang already
 	// does this.
-	empty := DNSResolver{ DNSBufSize: 4000 }
+	empty := DNSResolver{DNSBufSize: 4000}
 	for _, ip := range hints {
 		fmt.Println("Using hint", ip)
 		reader, err := empty.getResponse(ip, tdns.MakeName("."), tdns.NS, 0)
@@ -503,7 +502,7 @@ func doListen(listenAddress string) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
-	buf := make([]byte, 4096);
+	buf := make([]byte, 4096)
 	for {
 		n, address, err := conn.ReadFrom(buf)
 		if err != nil {
@@ -511,7 +510,7 @@ func doListen(listenAddress string) {
 			os.Exit(1)
 		}
 		fmt.Printf("Received packet from %s\n", address)
-		reader, err := tdns.NewMessagReader(buf, n);
+		reader, err := tdns.NewMessagReader(buf, n)
 		if err != nil {
 			continue
 		}
@@ -519,7 +518,7 @@ func doListen(listenAddress string) {
 			fmt.Printf("Received packet from %s was not a query\n", address)
 			continue
 		}
-		r := DNSResolver{ 1500 }
+		r := DNSResolver{1500}
 		go r.processQuery(conn, address.(*net.UDPAddr), reader)
 	}
 }
@@ -535,12 +534,12 @@ func main() {
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
 
 	if len(args) == 2 {
-		doListen(args[1])	
+		doListen(args[1])
 	}
 	dn := tdns.MakeName(args[1])
 	dt := tdns.MakeType(args[2])
 
-	resolver := DNSResolver{ DNSBufSize: 4000 }
+	resolver := DNSResolver{DNSBufSize: 4000}
 	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots)
 
 	if err != nil {
@@ -548,7 +547,7 @@ func main() {
 		os.Exit(1)
 	}
 	if len(res.Res) == 0 {
-			fmt.Printf("No data for %s %s\n", args[1], args[2])
+		fmt.Printf("No data for %s %s\n", args[1], args[2])
 	} else {
 		for _, r := range res.Res {
 			fmt.Printf("Resolved %s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)

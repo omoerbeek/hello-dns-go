@@ -23,9 +23,9 @@ import (
 )
 
 type (
-	RCode uint8
-	Type uint16
-	Class uint16
+	RCode   uint8
+	Type    uint16
+	Class   uint16
 	Section uint16
 
 	Label struct {
@@ -268,14 +268,14 @@ func (a *Name) PushBack(l *Label) {
 }
 
 func (n *Name) IsPartOf(root *Name) bool {
-	r := root.Name.Back();
-	us := n.Name.Back();
+	r := root.Name.Back()
+	us := n.Name.Back()
 	for {
 		if r == nil {
 			return true
 		}
 		if us == nil {
-			return false;
+			return false
 		}
 		usValue := us.Value.(*Label)
 		themValue := r.Value.(*Label)
@@ -347,15 +347,15 @@ var (
 
 	sectionmap2 map[Section]string
 
-	rcodemap1 = map[string]RCode {
-	"Noerror": Noerror,
-	"Formerr": Formerr,
-	"Servfail": Servfail,
-	"Nxdomain": Nxdomain,
-	"Notimp": Notimp,
-	"Refused": Refused,
-	"Notauth": Notauth,
-	"Badvers": Badvers,
+	rcodemap1 = map[string]RCode{
+		"Noerror":  Noerror,
+		"Formerr":  Formerr,
+		"Servfail": Servfail,
+		"Nxdomain": Nxdomain,
+		"Notimp":   Notimp,
+		"Refused":  Refused,
+		"Notauth":  Notauth,
+		"Badvers":  Badvers,
 	}
 
 	rcodemap2 map[RCode]string
@@ -364,15 +364,15 @@ var (
 func init() {
 	typemap2 = make(map[Type]string)
 	for k, v := range typemap1 {
-		typemap2[v] = k;
+		typemap2[v] = k
 	}
 	sectionmap2 = make(map[Section]string)
 	for k, v := range sectionmap1 {
-		sectionmap2[v] = k;
+		sectionmap2[v] = k
 	}
 	rcodemap2 = make(map[RCode]string)
 	for k, v := range rcodemap1 {
-		rcodemap2[v] = k;
+		rcodemap2[v] = k
 	}
 }
 

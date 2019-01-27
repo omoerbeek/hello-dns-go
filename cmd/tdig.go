@@ -46,7 +46,7 @@ func main() {
 	}
 	writer := tdns.NewMessageWriter(dn, dtype, tdns.IN, math.MaxUint16)
 	writer.DH.SetBit(tdns.RdMask)
-	writer.SetEDNS(4000, false, tdns.Noerror);
+	writer.SetEDNS(4000, false, tdns.Noerror)
 
 	// Use a good random source out of principle
 	r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))

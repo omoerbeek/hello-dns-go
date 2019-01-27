@@ -38,13 +38,13 @@ type MessageWriter struct {
 func NewMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *MessageWriter {
 	r := new(MessageWriter)
 	r.payload = new(bytes.Buffer)
-	r.maxsize = maxsize - HeaderLen;
+	r.maxsize = maxsize - HeaderLen
 	r.payload.Grow(r.maxsize)
 	r.name = *name
 	r.qtype = dnstype
 	r.class = class
 	r.resetRRs()
-	return r;
+	return r
 }
 
 func (w *MessageWriter) resetRRs() {
@@ -81,7 +81,7 @@ func XfrName(w *bytes.Buffer, a *Name, compress bool) {
 }
 
 func (w *MessageWriter) Serialize() []byte {
-	if (w.haveEDNS) {
+	if w.haveEDNS {
 		_ = w.putEDNS(w.maxsize+HeaderLen, w.rCode, w.doBit)
 		// XXX Handle does not fit case
 
@@ -92,28 +92,28 @@ func (w *MessageWriter) Serialize() []byte {
 	// Write header and then payload
 	binary.Write(buf, binary.BigEndian, w.DH)
 	w.payload.WriteTo(buf)
-	return buf.Bytes();
+	return buf.Bytes()
 }
 
 func (w *MessageWriter) putEDNS(bufsize int, ercode RCode, doBit bool) bool {
 	available := w.maxsize - w.payload.Len()
-	if (available >= 11) {
+	if available >= 11 {
 		XfrUInt8(w.payload, 0)
 		XfrUInt16(w.payload, OPT) // 'root' Name, our type
 		XfrUInt16(w.payload, uint16(bufsize))
-		XfrUInt8(w.payload, uint8(ercode) >> 4)
+		XfrUInt8(w.payload, uint8(ercode)>>4)
 		XfrUInt8(w.payload, 0)
 		var bitval uint8 = 0
-		if (doBit) {
+		if doBit {
 			bitval = 0x80
 		}
 		XfrUInt8(w.payload, bitval)
 		XfrUInt8(w.payload, 0)
 		XfrUInt16(w.payload, 0)
-		w.DH.ARCount++;
+		w.DH.ARCount++
 		return true
 	}
-	return false;
+	return false
 }
 
 func (w *MessageWriter) SetEDNS(newsize int, doBit bool, rcode RCode) {
@@ -121,9 +121,9 @@ func (w *MessageWriter) SetEDNS(newsize int, doBit bool, rcode RCode) {
 		w.maxsize = newsize - HeaderLen
 		// XXX Handle actual resizing
 	}
-	w.doBit = doBit;
-	w.rCode = rcode;
-	w.haveEDNS = true;
+	w.doBit = doBit
+	w.rCode = rcode
+	w.haveEDNS = true
 }
 
 func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, class Class, data RRGen) error {
@@ -138,20 +138,20 @@ func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, c
 
 	// XXX Error checking, did it fit?
 	switch s {
-		case Question:
-			return fmt.Errorf("Can't add questions to a DNS Message with putRR")
-		case Answer:
+	case Question:
+		return fmt.Errorf("Can't add questions to a DNS Message with putRR")
+	case Answer:
 		if w.DH.NSCount > 0 || w.DH.ARCount > 0 {
 			return fmt.Errorf("Can't add answer RRs out of order to a DNS Messa ge")
 		}
-			w.DH.ANCount++
-		case Authority:
-			if w.DH.ARCount > 0 {
-				return fmt.Errorf("Can't add authority RRs out of order to a DNS Message")
-			}
-			w.DH.NSCount++
-		case Additional:
-			w.DH.ARCount++
+		w.DH.ANCount++
+	case Authority:
+		if w.DH.ARCount > 0 {
+			return fmt.Errorf("Can't add authority RRs out of order to a DNS Message")
+		}
+		w.DH.NSCount++
+	case Additional:
+		w.DH.ARCount++
 	}
 	return nil
 }
@@ -174,7 +174,7 @@ type MessageReader struct {
 func (r *MessageReader) String() string {
 	header := r.DH.String()
 	if r.haveEDNS {
-		b := 0;
+		b := 0
 		if r.doBit {
 			b = 1
 		}
@@ -209,7 +209,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 	if r.DH.ARCount > 0 {
 		nowpos := r.payloadpos
 		r.skipRRs(int(r.DH.ANCount + r.DH.NSCount + r.DH.ARCount - 1))
-		if (r.getUint8(nil) == 0 && Type(r.getUint16(nil)) == OPT) {
+		if r.getUint8(nil) == 0 && Type(r.getUint16(nil)) == OPT {
 			r.bufsize = r.getUint16(nil)
 			r.getUint8(nil)
 			r.ednsVersion = r.getUint8(nil)
@@ -224,7 +224,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 		}
 		r.payloadpos = nowpos
 	}
-	return err;
+	return err
 }
 
 func (r *MessageReader) skipRRs(num int) {
@@ -241,11 +241,11 @@ func (r *MessageReader) skipRRs(num int) {
 
 type RRec struct {
 	Section Section
-	Name Name
-	Type Type
-	TTL	uint32
-	Class	Class
-	Data	RRGen
+	Name    Name
+	Type    Type
+	TTL     uint32
+	Class   Class
+	Data    RRGen
 }
 
 func (r *MessageReader) GetRR() (rrec *RRec) {
@@ -255,7 +255,7 @@ func (r *MessageReader) GetRR() (rrec *RRec) {
 	rrec = new(RRec)
 	if r.rrpos < r.DH.ANCount {
 		rrec.Section = Answer
-	} else if r.rrpos < r.DH.ANCount + r.DH.NSCount {
+	} else if r.rrpos < r.DH.ANCount+r.DH.NSCount {
 		rrec.Section = Authority
 	} else {
 		rrec.Section = Additional
@@ -346,7 +346,7 @@ func (r *MessageReader) getName(pos *uint16) *Name {
 			}
 		}
 		if labellen == 0 {
-			break;
+			break
 		}
 		label := NewLabel(string(r.getBlob(labellen, pos))) // XXX string vs []byte
 		ret.PushBack(label)

@@ -51,9 +51,9 @@ func TestDNSLabel(t *testing.T) {
 		{"aap", "aap", false, false},
 	}
 
-	for _, r := range (tests1) {
+	for _, r := range tests1 {
 		a := NewLabel(r.a)
-		b := NewLabel(r.b);
+		b := NewLabel(r.b)
 		r1 := a.Less(b)
 		r2 := b.Less(a)
 
@@ -67,7 +67,7 @@ func TestDNSLabel(t *testing.T) {
 	}{
 		{"Donald E. Eastlake 3rd", "Donald\\032E\\.\\032Eastlake\\0323rd"},
 	}
-	for _, r := range (tests2) {
+	for _, r := range tests2 {
 		a := NewLabel(r.a)
 		b := a.String()
 		if b != r.b {
@@ -77,11 +77,11 @@ func TestDNSLabel(t *testing.T) {
 
 	tests3 := []struct {
 		a, b string
-		r bool
+		r    bool
 	}{
 		{"aap", "aap", true},
 	}
-	for _, r := range (tests3) {
+	for _, r := range tests3 {
 		a := NewLabel(r.a)
 		b := NewLabel(r.b)
 		tt := a.Equals(b)
@@ -89,8 +89,6 @@ func TestDNSLabel(t *testing.T) {
 			t.Errorf("%s %s got %v expected %v", a, b, r, r.r)
 		}
 	}
-
-
 
 }
 
@@ -105,7 +103,7 @@ func TestName(t *testing.T) {
 		{NewName([]string{"p\x00werdns", "com"}), "p\\000werdns.com."},
 	}
 
-	for _, x := range (tests1) {
+	for _, x := range tests1 {
 		n := x.name
 		s := n.String()
 		if s != x.str {
@@ -124,7 +122,7 @@ func TestName(t *testing.T) {
 		{NewName([]string{"0", "nl"}), NewName([]string{"0", "nl", "com"}), true, false},
 	}
 
-	for _, tt := range (tests2) {
+	for _, tt := range tests2 {
 		r1 := tt.a.Less(tt.b)
 		r2 := tt.b.Less(tt.a)
 
@@ -135,24 +133,23 @@ func TestName(t *testing.T) {
 
 	tests3 := []struct {
 		a, b *Name
-		x bool
+		x    bool
 	}{
 		{NewName([]string{}), NewName([]string{}), true},
 		{NewName([]string{"aap", "nl"}), NewName([]string{"aap", "com"}), false},
 		{NewName([]string{"AAP", "NL"}), NewName([]string{"Aap", "nl"}), true},
 		{NewName([]string{"nl"}), NewName([]string{"0", "nl"}), false},
-		{NewName([]string{"0", "nl"}), NewName([]string{ "nl"}), true},
+		{NewName([]string{"0", "nl"}), NewName([]string{"nl"}), true},
 		{NewName([]string{"ns", "aap", "nl"}), NewName([]string{"aap", "nl"}), true},
 	}
 
-	for _, tt := range (tests3) {
+	for _, tt := range tests3 {
 		r1 := tt.a.IsPartOf(tt.b)
 
-		if r1 != tt.x  {
+		if r1 != tt.x {
 			t.Errorf("a: %s, b: %s got %v expected %v", tt.a, tt.b, r1, tt.x)
 		}
 	}
-
 
 }
 
@@ -167,7 +164,7 @@ func TestMakeName(t *testing.T) {
 		{MakeName("aa..bb.cc"), "aa.bb.cc."}, // XXX correct?
 	}
 
-	for _, x := range (tests1) {
+	for _, x := range tests1 {
 		n := x.name
 		s := n.String()
 		if s != x.str {
