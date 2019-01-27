@@ -466,7 +466,7 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 
 	res, err := resolver.resolveAt(&reader.Name, reader.Type, 0, tdns.MakeName(""), &roots)
 
-	fmt.Printf("Result of query for %s|%s\n", reader.Name.String(), reader.Type)
+	fmt.Printf("Result of query for %s|%s %d/%d\n", reader.Name.String(), reader.Type, len(res.Intermediates), len(res.Res))
 	for _, r := range res.Intermediates {
 		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
 	}
@@ -520,7 +520,7 @@ func doListen(listenAddress string) {
 			continue
 		}
 		r := DNSResolver{ 1500 }
-		r.processQuery(conn, address.(*net.UDPAddr), reader)
+		go r.processQuery(conn, address.(*net.UDPAddr), reader)
 	}
 }
 
