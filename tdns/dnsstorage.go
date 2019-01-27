@@ -104,7 +104,7 @@ const (
 func (h *Header) String() string {
 	line1 := fmt.Sprintf("Header(Id=%#04x Fl=%#04x QD=%d AN=%d NS=%d AR=%0d\n",
 		h.Id, h.Flags, h.QDCount, h.ANCount, h.NSCount, h.ARCount)
-	line2 := fmt.Sprintf("Qr=%d OpCode=%#x Aa=%d Tc=%d Rd=%d Ra=%d Un=%d, Ad=%d Cd=%d Rcode=%#x)",
+	line2 := fmt.Sprintf("Qr=%d OpCode=%#x Aa=%d Tc=%d Rd=%d Ra=%d Un=%d, Ad=%d Cd=%d Rcode=%s)",
 		h.Bit(QrMask),
 		h.Opcode(),
 		h.Bit(AaMask),
@@ -203,7 +203,7 @@ func (a *Label) Equals(b *Label) bool {
 
 func (a *Label) String() string {
 	var b strings.Builder
-	for _, a := range (a.Label) {
+	for _, a := range a.Label {
 		if a <= 0x20 || a >= 0x7f { // RFC 4343
 			_, _ = fmt.Fprintf(&b, "\\%03d", a)
 		} else {
@@ -218,7 +218,7 @@ func (a *Label) String() string {
 
 func NewName(labels []string) *Name {
 	n := new(Name)
-	for _, l := range (labels) {
+	for _, l := range labels {
 		n.Name.PushBack(NewLabel(l))
 	}
 	return n
@@ -305,7 +305,7 @@ func MakeName(str string) *Name {
 }
 
 var (
-	typemap1 map[string]Type = map[string]Type{
+	typemap1 = map[string]Type{
 		"A":      A,
 		"NS":     NS,
 		"CNAME":  CNAME,
@@ -330,7 +330,7 @@ var (
 
 	typemap2 map[Type]string
 
-	sectionmap1 map[string]Section = map[string]Section{
+	sectionmap1 = map[string]Section{
 		"Question":   Question,
 		"Answer":     Answer,
 		"Authority":  Authority,
@@ -338,23 +338,40 @@ var (
 	}
 
 	sectionmap2 map[Section]string
+
+	rcodemap1 = map[string]RCode {
+	"Noerror": Noerror,
+	"Formerr": Formerr,
+	"Servfail": Servfail,
+	"Nxdomain": Nxdomain,
+	"Notimp": Notimp,
+	"Refused": Refused,
+	"Notauth": Notauth,
+	"Badvers": Badvers,
+	}
+
+	rcodemap2 map[RCode]string
 )
 
 func init() {
 	typemap2 = make(map[Type]string)
-	for k, v := range (typemap1) {
+	for k, v := range typemap1 {
 		typemap2[v] = k;
 	}
 	sectionmap2 = make(map[Section]string)
-	for k, v := range (sectionmap1) {
+	for k, v := range sectionmap1 {
 		sectionmap2[v] = k;
+	}
+	rcodemap2 = make(map[RCode]string)
+	for k, v := range rcodemap1 {
+		rcodemap2[v] = k;
 	}
 }
 
 func MakeType(str string) Type {
 	ret := typemap1[str]
 	if ret == 0 {
-		panic("NYI")
+		panic(fmt.Sprintf("Unknown type: %s", str))
 	}
 	return ret
 }
@@ -369,6 +386,14 @@ func (t Type) String() string {
 
 func (s Section) String() string {
 	ret := sectionmap2[s]
+	if ret == "" {
+		return "UNKNWON"
+	}
+	return ret
+}
+
+func (s RCode) String() string {
+	ret := rcodemap2[s]
 	if ret == "" {
 		return "UNKNWON"
 	}
