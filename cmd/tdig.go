@@ -44,7 +44,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Could not contact %s: %s\n", args[3], err)
 		os.Exit(1)
 	}
-	writer := tdns.NewDNSMessageWriter(dn, dtype, tdns.IN, math.MaxUint16)
+	writer := tdns.NewMessageWriter(dn, dtype, tdns.IN, math.MaxUint16)
 	writer.DH.SetBit(tdns.RdMask)
 	writer.SetEDNS(4000, false, tdns.Noerror);
 

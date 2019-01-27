@@ -195,7 +195,7 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 
 	for tries := 0; tries < 4; tries++ {
 
-		writer := tdns.NewDNSMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
+		writer := tdns.NewMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
 
 		if (doEDNS) {
 			writer.SetEDNS(res.DNSBufSize, false, tdns.Noerror)
@@ -454,16 +454,89 @@ func resolveHints() {
 	}
 }
 
+func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.MessageReader) {
+	writer := tdns.NewMessageWriter(&reader.Name, reader.Type, tdns.IN, math.MaxUint16)
+
+	writer.DH.SetBitValue(tdns.RdMask, reader.DH.Bit(tdns.RdMask))
+	writer.DH.SetBit(tdns.RaMask)
+	writer.DH.SetBit(tdns.QrMask)
+	writer.DH.Id = reader.DH.Id
+
+	resolver := DNSResolver{4000}
+
+	res, err := resolver.resolveAt(&reader.Name, reader.Type, 0, tdns.MakeName(""), &roots)
+
+	fmt.Printf("Result of query for %s|%s\n", reader.Name.String(), reader.Type)
+	for _, r := range res.Intermediates {
+		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+	}
+	for _, r := range res.Res {
+		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+	}
+	// XXX numqueries
+
+	switch err.(type) {
+	case nil:
+		for _, r := range res.Intermediates {
+			writer.PutRR(tdns.Answer, &r.Name, r.Type, r.TTL, r.Class, r.Data)
+		}
+		for _, r := range res.Res {
+			writer.PutRR(tdns.Answer, &r.Name, r.Type, r.TTL, r.Class, r.Data)
+		}
+	case NodataError:
+		fmt.Printf("Nodata for %s|%s\n", reader.Name.String(), reader.Type)
+	case NxdomainError:
+		fmt.Printf("Nxdomain for %s|%s\n", reader.Name.String(), reader.Type)
+		writer.DH.SetRcode(tdns.Nxdomain)
+	}
+	conn.WriteTo(writer.Serialize(), address)
+}
+
+func doListen(listenAddress string) {
+	address, err := net.ResolveUDPAddr("udp", listenAddress)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
+	conn, err := net.ListenUDP("udp", address)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
+	buf := make([]byte, 4096);
+	for {
+		n, address, err := conn.ReadFrom(buf)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Received packet from %s\n", address)
+		reader, err := tdns.NewMessagReader(buf, n);
+		if err != nil {
+			continue
+		}
+		if reader.DH.Bit(tdns.QrMask) == 1 {
+			fmt.Printf("Received packet from %s was not a query\n", address)
+			continue
+		}
+		r := DNSResolver{ 1500 }
+		r.processQuery(conn, address.(*net.UDPAddr), reader)
+	}
+}
+
 func main() {
 	args := os.Args
-	if len(args) != 3 {
+	if len(args) != 2 && len(args) != 3 {
 		fmt.Fprintf(os.Stderr, "Usage: tres name type\n")
-		//fmt.Fprintf(os.Stderr, "       tres ip:port\n")
+		fmt.Fprintf(os.Stderr, "       tres ip:port\n")
 		os.Exit(1)
 	}
 	resolveHints()
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
 
+	if len(args) == 2 {
+		doListen(args[1])	
+	}
 	dn := tdns.MakeName(args[1])
 	dt := tdns.MakeType(args[2])
 

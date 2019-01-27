@@ -35,7 +35,7 @@ type MessageWriter struct {
 	maxsize  int
 }
 
-func NewDNSMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *MessageWriter {
+func NewMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *MessageWriter {
 	r := new(MessageWriter)
 	r.payload = new(bytes.Buffer)
 	r.maxsize = maxsize - HeaderLen;
@@ -50,30 +50,34 @@ func NewDNSMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *Me
 func (w *MessageWriter) resetRRs() {
 	w.payload.Reset()
 	w.DH.QDCount = 1
-	w.XfrName(&w.name, false)
-	w.XfrUInt16(uint16(w.qtype))
-	w.XfrUInt16(uint16(w.class))
+	XfrName(w.payload, &w.name, false)
+	XfrUInt16(w.payload, uint16(w.qtype))
+	XfrUInt16(w.payload, uint16(w.class))
 }
 
-func (w *MessageWriter) XfrUInt16(val uint16) {
-	binary.Write(w.payload, binary.BigEndian, val)
+func XfrUInt32(w *bytes.Buffer, val uint32) {
+	binary.Write(w, binary.BigEndian, val)
 }
 
-func (w *MessageWriter) XfrUInt8(val uint8) {
-	w.payload.WriteByte(val)
+func XfrUInt16(w *bytes.Buffer, val uint16) {
+	binary.Write(w, binary.BigEndian, val)
 }
 
-func (w *MessageWriter) XfrBlob(data []byte) {
-	w.payload.Write(data)
+func XfrUInt8(w *bytes.Buffer, val uint8) {
+	w.WriteByte(val)
 }
 
-func (w *MessageWriter) XfrName(a *Name, compress bool) {
+func XfrBlob(w *bytes.Buffer, data []byte) {
+	w.Write(data)
+}
+
+func XfrName(w *bytes.Buffer, a *Name, compress bool) {
 	for e := a.Name.Front(); e != nil; e = e.Next() {
 		l := e.Value.(*Label)
-		w.XfrUInt8(uint8(l.Len()))
-		w.XfrBlob(l.Label)
+		XfrUInt8(w, uint8(l.Len()))
+		XfrBlob(w, l.Label)
 	}
-	w.XfrUInt8(uint8(0))
+	XfrUInt8(w, uint8(0))
 }
 
 func (w *MessageWriter) Serialize() []byte {
@@ -94,18 +98,18 @@ func (w *MessageWriter) Serialize() []byte {
 func (w *MessageWriter) putEDNS(bufsize int, ercode RCode, doBit bool) bool {
 	available := w.maxsize - w.payload.Len()
 	if (available >= 11) {
-		w.XfrUInt8(0)
-		w.XfrUInt16(OPT) // 'root' Name, our type
-		w.XfrUInt16(uint16(bufsize))
-		w.XfrUInt8(uint8(ercode) >> 4)
-		w.XfrUInt8(0)
+		XfrUInt8(w.payload, 0)
+		XfrUInt16(w.payload, OPT) // 'root' Name, our type
+		XfrUInt16(w.payload, uint16(bufsize))
+		XfrUInt8(w.payload, uint8(ercode) >> 4)
+		XfrUInt8(w.payload, 0)
 		var bitval uint8 = 0
 		if (doBit) {
 			bitval = 0x80
 		}
-		w.XfrUInt8(bitval)
-		w.XfrUInt8(0)
-		w.XfrUInt16(0)
+		XfrUInt8(w.payload, bitval)
+		XfrUInt8(w.payload, 0)
+		XfrUInt16(w.payload, 0)
 		w.DH.ARCount++;
 		return true
 	}
@@ -120,6 +124,36 @@ func (w *MessageWriter) SetEDNS(newsize int, doBit bool, rcode RCode) {
 	w.doBit = doBit;
 	w.rCode = rcode;
 	w.haveEDNS = true;
+}
+
+func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, class Class, data RRGen) error {
+	//cursize := w.payloadpos
+	XfrName(w.payload, name, true)
+	XfrUInt16(w.payload, uint16(dnstype))
+	XfrUInt16(w.payload, uint16(class))
+	XfrUInt32(w.payload, ttl)
+	bytes := data.ToMessage()
+	XfrUInt16(w.payload, uint16(len(bytes)))
+	XfrBlob(w.payload, bytes)
+
+	// XXX Error checking, did it fit?
+	switch s {
+		case Question:
+			return fmt.Errorf("Can't add questions to a DNS Message with putRR")
+		case Answer:
+		if w.DH.NSCount > 0 || w.DH.ARCount > 0 {
+			return fmt.Errorf("Can't add answer RRs out of order to a DNS Messa ge")
+		}
+			w.DH.ANCount++
+		case Authority:
+			if w.DH.ARCount > 0 {
+				return fmt.Errorf("Can't add authority RRs out of order to a DNS Message")
+			}
+			w.DH.NSCount++
+		case Additional:
+			w.DH.ARCount++
+	}
+	return nil
 }
 
 type MessageReader struct {
@@ -210,6 +244,7 @@ type RRec struct {
 	Name Name
 	Type Type
 	TTL	uint32
+	Class	Class
 	Data	RRGen
 }
 
@@ -230,7 +265,7 @@ func (r *MessageReader) GetRR() (rrec *RRec) {
 
 	rrec.Name = *r.getName(nil)
 	rrec.Type = Type(r.getUint16(nil))
-	r.getUint16(nil) // class
+	rrec.Class = Class(r.getUint16(nil))
 	rrec.TTL = r.getUint32(nil)
 	l := r.getUint16(nil)
 	r.endofrecord = r.payloadpos + l

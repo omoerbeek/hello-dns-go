@@ -130,8 +130,16 @@ func (h *Header) Bit(mask uint16) int {
 	}
 }
 
-func (h *Header) ClearHeaderBit(mask uint16) {
+func (h *Header) ClearBit(mask uint16) {
 	h.Flags &^= mask
+}
+
+func (h *Header) SetBitValue(mask uint16, val int) {
+	if val != 0 {
+		h.SetBit(mask)
+	} else {
+		h.ClearBit(mask)
+	}
 }
 
 func (h *Header) SetOpcode(val uint16) {
