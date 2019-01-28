@@ -43,6 +43,7 @@ type (
 
 	DNSResolver struct {
 		DNSBufSize int
+		logprefix string
 	}
 
 	ResolveResult struct {
@@ -186,8 +187,13 @@ func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	return
 }
 
+func (res *DNSResolver) log(format string, args ...interface{}) {
+	str := fmt.Sprintf(format, args...)
+	fmt.Printf("%s%s\n", res.logprefix, str)
+}
+
+
 func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.Type, depth int) (reader *tdns.MessageReader, err error) {
-	prefix := strings.Repeat(" ", depth)
 
 	doTCP := false
 	doEDNS := true
@@ -215,21 +221,21 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 		}
 		// for security reasons, you really need this
 		if reader.DH.Id != writer.DH.Id {
-			fmt.Printf("%sID mismatch on answer\n", prefix)
+			res.log("ID mismatch on answer")
 			continue
 		}
 		if reader.DH.Bit(tdns.QrMask) == 0 {
-			fmt.Printf("%sWhat we received was not a response, ignoring\n", prefix)
+			res.log("What we received was not a response, ignoring")
 			continue
 		}
 		if reader.DH.Rcode() == tdns.Formerr {
 			// XXX this should check that there is no OPT in the response
-			fmt.Printf("%sGot a Formerr, resending without EDNS\n", prefix)
+			res.log("Got a Formerr, resending without EDNS")
 			doEDNS = false
 			continue
 		}
 		if reader.DH.Bit(tdns.TcMask) == 1 {
-			fmt.Printf("%sGot a truncated answer, retrying over TCP\n", prefix)
+			res.log("Got a truncated answer, retrying over TCP")
 			doTCP = true
 			continue
 		}
@@ -239,64 +245,66 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 }
 
 func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret ResolveResult, err error) {
-	prefix := fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
-	fmt.Printf("%sStarting query at authority = %s, have %d addresses to try\n", prefix, auth, mservers.Size())
+	oldprefix := resolver.logprefix
+	resolver.logprefix = fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
+	defer func () { resolver.logprefix = oldprefix }()
+
+	resolver.log("Starting query at authority = %s, have %d addresses to try", auth, mservers.Size())
 
 	servers := mservers.RandomizeIPs()
 
 	for _, server := range servers {
 		var newAuth tdns.Name
 
-		fmt.Printf("%sSending to server %s at %s\n", prefix, server.Name, server.IP)
+		resolver.log("Sending to server %s at %s", server.Name, server.IP)
 
 		var reader *tdns.MessageReader
 
 		reader, err = resolver.getResponse(server.IP, name, dnstype, depth)
 		if err != nil {
-			fmt.Printf("%s%s\n", prefix, err)
+			resolver.log("%s", err)
 			continue
 		}
 
 		if !reader.Name.Equals(name) || reader.Type != dnstype {
-			fmt.Printf("%sGot a response %s to a different question %s or different %s %s type than we asked for!\n",
-				prefix, reader.Name.String(), name.String(), reader.Type, dnstype)
+			resolver.log("Got a response %s to a different question %s or different %s %s type than we asked for!",
+				reader.Name.String(), name.String(), reader.Type, dnstype)
 			continue // see if another server wants to work with us
 		}
 
 		// In a real resolver, you must ignore NXDOMAIN in case of a CNAME.
 		// Because that is how the intern et rolls.
 		if reader.DH.Rcode() == tdns.Nxdomain {
-			fmt.Printf("%sGot an Nxdomain, it does not exist\n", prefix)
+			resolver.log("Got an Nxdomain, it does not exist")
 			err = NxdomainError{}
 			return
 		} else if reader.DH.Rcode() != tdns.Noerror {
-			fmt.Printf("%sAnswer from authoritative server had an error %s\n", prefix, reader.DH.Rcode())
+			resolver.log("Answer from authoritative server had an error %s", reader.DH.Rcode())
 			err = fmt.Errorf("Answer from authoritative server had an error: %s", reader.DH.Rcode())
 			return
 		}
 		if reader.DH.Bit(tdns.AaMask) == 1 {
-			fmt.Printf("%sAnswer says it is authorative\n", prefix)
+			resolver.log("Answer says it is authorative")
 		}
 
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
 		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
-			fmt.Printf("%s%v %s IN %v ttl=%v %v\n",
-				prefix, rrec.Section, rrec.Name.String(), rrec.Type, rrec.TTL, rrec.Data)
+			resolver.log("%s", rrec)
 
 			if reader.DH.Bit(tdns.AaMask) == 1 {
 				// Authoritative answer. We trust this.
 				if rrec.Section == tdns.Answer && name.Equals(&rrec.Name) && dnstype == rrec.Type {
-					fmt.Printf("%sWe got an answer to our question!\n", prefix)
+					resolver.log("We got an answer to our question!")
 					ret.Res = append(ret.Res, rrec)
 				} else if name.Equals(&rrec.Name) && rrec.Type == tdns.CNAME {
 					// CNAME handling
 					target := rrec.Data.(*tdns.CNAMEGen).CName
 					ret.Intermediates = append(ret.Intermediates, rrec)
-					fmt.Printf("%sWe got a CNAME to %s, chasing\n", prefix, name.String())
+					resolver.log("We got a CNAME to %s, chasing", name.String())
 					if target.IsPartOf(auth) {
-						fmt.Printf("%sTarget %s is within %s, harvesting from packet\n", prefix, target, auth)
+						resolver.log("Target %s is within %s, harvesting from packet", target, auth)
 						hadMatch := false
 						for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
 							if rrec.Section == tdns.Answer && rrec.Name.Equals(target) && rrec.Type == dnstype {
@@ -305,10 +313,10 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 							}
 						}
 						if hadMatch {
-							fmt.Printf("%sIn-message chase worked, we're done\n", prefix)
+							resolver.log("In-message chase worked, we're done")
 							return
 						} else {
-							fmt.Printf("%sIn-message chase not succesful, will do new query for %s\n", prefix, target)
+							resolver.log("In-message chase not succesful, will do new query for %s", target)
 						}
 					}
 
@@ -331,7 +339,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						nsses[nsname.String()] = nsname
 						newAuth = rrec.Name
 					} else {
-						fmt.Printf("%sAuthoritative server gave us NS record to which this query does not belong\n", prefix)
+						resolver.log("Authoritative server gave us NS record to which this query does not belong")
 					}
 				} else if rrec.Section == tdns.Additional && nsses[rrec.Name.String()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
 					if rrec.Name.IsPartOf(auth) {
@@ -342,25 +350,25 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 							addresses.Add(&rrec.Name, a.IP)
 						}
 					} else {
-						fmt.Printf("%sNot accepting IP address of %s: out of authority of this server\n", prefix, rrec.Name.String())
+						resolver.log("Not accepting IP address of %s: out of authority of this server", rrec.Name.String())
 					}
 				}
 			}
 
 		}
 		if len(ret.Res) > 0 {
-			fmt.Printf("%sDone, returning %d results, %d intermediate\n", prefix, len(ret.Res), len(ret.Intermediates))
+			resolver.log("Done, returning %d results, %d intermediate", len(ret.Res), len(ret.Intermediates))
 			return
 		} else if reader.DH.Bit(tdns.AaMask) == 1 {
-			fmt.Printf("%sNo data response\n", prefix)
+			resolver.log("No data response")
 			err = NodataError{}
 			return
 		}
 
-		fmt.Printf("%sWe got delegated to %d %s nameserver names\n", prefix, len(nsses), newAuth.String())
+		resolver.log("We got delegated to %d %s nameserver names", len(nsses), newAuth.String())
 		numa := addresses.Size()
 		if numa > 0 {
-			fmt.Printf("%sWe have %d addresses to iterate to: %s\n", prefix, numa, addresses.String())
+			resolver.log("We have %d addresses to iterate to: %s", numa, addresses.String())
 			res2, err2 := resolver.resolveAt(name, dnstype, depth+1, &newAuth, &addresses)
 			if err2 != nil {
 				return res2, err2
@@ -368,12 +376,12 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 			if len(res2.Res) > 0 {
 				return res2, err2
 			}
-			fmt.Printf("%sThe IP addresses we had dit not provide a good answer\n", prefix)
+			resolver.log("The IP addresses we had dit not provide a good answer")
 
 		}
 		// well we could not make it work using the servers we had addresses for. Let's try
 		// to get addresses for the rest
-		fmt.Printf("%sDon't have a resolved nameserver to ask anymore, trying to resolve %d names\n", prefix, len(nsses))
+		resolver.log("Don't have a resolved nameserver to ask anymore, trying to resolve %d names", len(nsses))
 		var rnsses []tdns.Name
 		for _, n := range nsses {
 			rnsses = append(rnsses, *n)
@@ -385,13 +393,13 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 		for _, n := range rnsses {
 			for _, t := range []tdns.Type{tdns.A, tdns.AAAA} {
 				newns := NewNameIPSet()
-				fmt.Printf("%sAttempting to resolve NS %s|%s\n", prefix, n.String(), t)
+				resolver.log("Attempting to resolve NS %s|%s", n.String(), t)
 				result, err := resolver.resolveAt(&n, t, depth+1, tdns.MakeName(""), &roots)
 				if err != nil {
-					fmt.Printf("%sFailed to resolve ns name for %s %s: %s, trying next server (if there)\n", prefix, n.String(), t, err)
+					resolver.log("Failed to resolve ns name for %s %s: %s, trying next server (if there)", n.String(), t, err)
 					continue
 				}
-				fmt.Printf("%sGot %d nameserver %s addresses, adding to list\n", prefix, len(result.Res), t)
+				resolver.log("Got %d nameserver %s addresses, adding to list", len(result.Res), t)
 				for _, res := range result.Res {
 					switch a := res.Data.(type) {
 					case *tdns.AGen:
@@ -401,7 +409,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 					}
 				}
 				if newns.Size() == 0 {
-					fmt.Printf("%sFailed to resolve name for %s %s\n", prefix, n.String(), t)
+					resolver.log("Failed to resolve name for %s %s", n.String(), t)
 					continue
 				}
 				res2, err := resolver.resolveAt(name, dnstype, depth+1, &newAuth, &newns)
@@ -409,7 +417,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 					_, isNd := err.(NodataError)
 					_, isNx := err.(NxdomainError)
 					if !isNd && !isNx {
-						fmt.Printf("%sFailed to resolve name for %s %s: %s trying next server (if there)\n", prefix, n.String(), t, err)
+						resolver.log("Failed to resolve name for %s %s: %s trying next server (if there)", n.String(), t, err)
 						continue
 					} else {
 						return res2, err
@@ -461,16 +469,16 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 	writer.DH.SetBit(tdns.QrMask)
 	writer.DH.Id = reader.DH.Id
 
-	resolver := DNSResolver{4000}
+	resolver := DNSResolver{DNSBufSize: 4000}
 
 	res, err := resolver.resolveAt(&reader.Name, reader.Type, 0, tdns.MakeName(""), &roots)
 
-	fmt.Printf("Result of query for %s|%s %d/%d\n", reader.Name.String(), reader.Type, len(res.Intermediates), len(res.Res))
+	resolver.log("Result of query for %s|%s %d/%d", reader.Name.String(), reader.Type, len(res.Intermediates), len(res.Res))
 	for _, r := range res.Intermediates {
-		fmt.Printf("%s\n", r.String())
+		resolver.log("%s", r.String())
 	}
 	for _, r := range res.Res {
-		fmt.Printf("%s\n", r.String())
+		resolver.log("%s", r.String())
 	}
 	// XXX numqueries
 
@@ -483,9 +491,9 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 			writer.PutRR(tdns.Answer, &r.Name, r.Type, r.TTL, r.Class, r.Data)
 		}
 	case NodataError:
-		fmt.Printf("Nodata for %s|%s\n", reader.Name.String(), reader.Type)
+		resolver.log("Nodata for %s|%s", reader.Name.String(), reader.Type)
 	case NxdomainError:
-		fmt.Printf("Nxdomain for %s|%s\n", reader.Name.String(), reader.Type)
+		resolver.log("Nxdomain for %s|%s", reader.Name.String(), reader.Type)
 		writer.DH.SetRcode(tdns.Nxdomain)
 	}
 	conn.WriteTo(writer.Serialize(), address)
@@ -518,7 +526,7 @@ func doListen(listenAddress string) {
 			fmt.Printf("Received packet from %s was not a query\n", address)
 			continue
 		}
-		r := DNSResolver{1500}
+		r := DNSResolver{DNSBufSize:1500}
 		go r.processQuery(conn, address.(*net.UDPAddr), reader)
 	}
 }
