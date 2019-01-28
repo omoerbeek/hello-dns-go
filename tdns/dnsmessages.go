@@ -248,6 +248,10 @@ type RRec struct {
 	Data    RRGen
 }
 
+func (r *RRec) String() string {
+	return fmt.Sprintf("%-30s\t%d\t%v\t%v", &r.Name, r.TTL, r.Type, r.Data)
+}
+
 func (r *MessageReader) GetRR() (rrec *RRec) {
 	if r.payloadpos == uint16(len(r.payload)) {
 		return nil

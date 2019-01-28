@@ -263,9 +263,10 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 			continue // see if another server wants to work with us
 		}
 
+		// In a real resolver, you must ignore NXDOMAIN in case of a CNAME.
+		// Because that is how the intern et rolls.
 		if reader.DH.Rcode() == tdns.Nxdomain {
 			fmt.Printf("%sGot an Nxdomain, it does not exist\n", prefix)
-			//err = fmt.Errorf("NxDomain error")
 			err = NxdomainError{}
 			return
 		} else if reader.DH.Rcode() != tdns.Noerror {
@@ -280,8 +281,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
-		var rrec *tdns.RRec
-		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
 			fmt.Printf("%s%v %s IN %v ttl=%v %v\n",
 				prefix, rrec.Section, rrec.Name.String(), rrec.Type, rrec.TTL, rrec.Data)
 
@@ -353,7 +353,6 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 			return
 		} else if reader.DH.Bit(tdns.AaMask) == 1 {
 			fmt.Printf("%sNo data response\n", prefix)
-			//err = fmt.Errorf("Nodata Exception")
 			err = NodataError{}
 			return
 		}
@@ -419,8 +418,9 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 				if len(res2.Res) > 0 {
 					return res2, nil
 				}
-				// let's move on to the next server
+				// Try AAAA
 			}
+			// Try next NS
 		}
 		return
 	}
@@ -428,7 +428,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 }
 
 func resolveHints() {
-	// We do not explicitly randomize maps, since golang already
+	// We do not explicitly randomize this map, since golang already
 	// does this.
 	empty := DNSResolver{DNSBufSize: 4000}
 	for _, ip := range hints {
@@ -467,10 +467,10 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 
 	fmt.Printf("Result of query for %s|%s %d/%d\n", reader.Name.String(), reader.Type, len(res.Intermediates), len(res.Res))
 	for _, r := range res.Intermediates {
-		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+		fmt.Printf("%s\n", r.String())
 	}
 	for _, r := range res.Res {
-		fmt.Printf("%s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+		fmt.Printf("%s\n", r.String())
 	}
 	// XXX numqueries
 
@@ -550,7 +550,7 @@ func main() {
 		fmt.Printf("No data for %s %s\n", args[1], args[2])
 	} else {
 		for _, r := range res.Res {
-			fmt.Printf("Resolved %s %d %s %s\n", r.Name.String(), r.TTL, r.Type, r.Data)
+			fmt.Printf("Resolved %s\n", r.String())
 		}
 	}
 	os.Exit(0)

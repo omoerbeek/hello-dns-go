@@ -68,10 +68,8 @@ func main() {
 	reader, err := tdns.NewMessagReader(data, n)
 	fmt.Printf("Read %d bytes\n%v\n%v\n", n, reader, err)
 
-	var rrec *tdns.RRec
-	for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
-		fmt.Printf("section=%v name=%s type=%v ttl=%v data=%v\n",
-			rrec.Section, rrec.Name.String(), rrec.Type, rrec.TTL, rrec.Data)
+	for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+		fmt.Printf("section=%-10s\t%s\n", rrec.Section, rrec)
 	}
 	os.Exit(0)
 }
