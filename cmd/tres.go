@@ -253,7 +253,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 
 	servers := mservers.RandomizeIPs()
 
-	for _, server := range servers {
+	for serverindex, server := range servers {
 		var newAuth tdns.Name
 
 		resolver.log("Sending to server %s at %s", server.Name, server.IP)
@@ -280,6 +280,9 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 			return
 		} else if reader.DH.Rcode() != tdns.Noerror {
 			resolver.log("Answer from authoritative server had an error %s", reader.DH.Rcode())
+			if reader.DH.Rcode() == tdns.Servfail && serverindex < len(servers)-1 {
+				continue
+			}
 			err = fmt.Errorf("Answer from authoritative server had an error: %s", reader.DH.Rcode())
 			return
 		}
