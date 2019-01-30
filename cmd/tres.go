@@ -100,7 +100,7 @@ func (ips *NameIPSet) String() string {
 }
 
 func (ips *NameIPSet) Add(name *tdns.Name, ip net.IP) {
-	key1 := name.String()
+	key1 := name.K()
 	key2 := ip.String()
 	if ips.Map[key1] == nil {
 		ips.Map[key1] = make(map[string]net.IP)
@@ -339,12 +339,12 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 				if rrec.Section == tdns.Authority && rrec.Type == tdns.NS {
 					if name.IsPartOf(&rrec.Name) {
 						nsname := rrec.Data.(*tdns.NSGen).NSName
-						nsses[nsname.String()] = nsname
+						nsses[nsname.K()] = nsname
 						newAuth = rrec.Name
 					} else {
 						resolver.log("Authoritative server gave us NS record to which this query does not belong")
 					}
-				} else if rrec.Section == tdns.Additional && nsses[rrec.Name.String()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
+				} else if rrec.Section == tdns.Additional && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
 					if rrec.Name.IsPartOf(auth) {
 						switch a := rrec.Data.(type) {
 						case *tdns.AGen:

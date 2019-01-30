@@ -24,7 +24,7 @@ import (
 
 type RRGen interface {
 	Gen(r *MessageReader, l uint16)
-	ToMessage() []byte
+	ToMessage(w *MessageWriter) []byte
 	String() string
 }
 
@@ -36,7 +36,7 @@ func (a *UnknownGen) Gen(r *MessageReader, l uint16) {
 	a.Data = r.getBlob(l, nil)
 }
 
-func (a *UnknownGen) ToMessage() []byte {
+func (a *UnknownGen) ToMessage(*MessageWriter) []byte {
 	return a.Data
 }
 
@@ -53,7 +53,7 @@ func (a *AGen) Gen(r *MessageReader, l uint16) {
 	a.IP = []byte{byte(data >> 24), byte(data >> 16), byte(data >> 8), byte(data)}
 }
 
-func (a *AGen) ToMessage() []byte {
+func (a *AGen) ToMessage(*MessageWriter) []byte {
 	return a.IP
 }
 
@@ -69,7 +69,7 @@ func (a *AAAAGen) Gen(r *MessageReader, l uint16) {
 	a.IP = r.getBlob(16, nil)
 }
 
-func (a *AAAAGen) ToMessage() []byte {
+func (a *AAAAGen) ToMessage(*MessageWriter) []byte {
 	return a.IP
 }
 
@@ -85,9 +85,9 @@ func (a *NSGen) Gen(r *MessageReader, l uint16) {
 	a.NSName = r.getName(nil)
 }
 
-func (a *NSGen) ToMessage() []byte {
+func (a *NSGen) ToMessage(w *MessageWriter) []byte {
 	var buf bytes.Buffer
-	XfrName(&buf, a.NSName, true)
+	w.XfrName(&buf, a.NSName, true)
 	return buf.Bytes()
 }
 
@@ -103,9 +103,9 @@ func (a *CNAMEGen) Gen(r *MessageReader, l uint16) {
 	a.CName = r.getName(nil)
 }
 
-func (a *CNAMEGen) ToMessage() []byte {
+func (a *CNAMEGen) ToMessage(w *MessageWriter) []byte {
 	var buf bytes.Buffer
-	XfrName(&buf, a.CName, true)
+	w.XfrName(&buf, a.CName, true)
 	return buf.Bytes()
 }
 

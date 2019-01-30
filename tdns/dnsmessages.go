@@ -23,16 +23,46 @@ import (
 	"io"
 )
 
+type RRec struct {
+	Section Section
+	Name    Name
+	Type    Type
+	TTL     uint32
+	Class   Class
+	Data    RRGen
+}
+
+func (r *RRec) String() string {
+	return fmt.Sprintf("%-30s\t%d\t%v\t%v", &r.Name, r.TTL, r.Type, r.Data)
+}
+
+func XfrUInt32(b *bytes.Buffer, val uint32) {
+	binary.Write(b, binary.BigEndian, val)
+}
+
+func XfrUInt16(b *bytes.Buffer, val uint16) {
+	binary.Write(b, binary.BigEndian, val)
+}
+
+func XfrUInt8(b *bytes.Buffer, val uint8) {
+	b.WriteByte(val)
+}
+
+func XfrBlob(b *bytes.Buffer, data []byte) {
+	b.Write(data)
+}
+
 type MessageWriter struct {
 	DH       Header
 	name     Name
-	qtype    Type
+	dnstype  Type
 	class    Class
 	haveEDNS bool
 	doBit    bool
-	rCode    RCode
+	erCode   RCode
 	payload  *bytes.Buffer
 	maxsize  int
+	namemap map[string]uint16
 }
 
 func NewMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *MessageWriter {
@@ -41,51 +71,52 @@ func NewMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *Messa
 	r.maxsize = maxsize - HeaderLen
 	r.payload.Grow(r.maxsize)
 	r.name = *name
-	r.qtype = dnstype
+	r.dnstype = dnstype
 	r.class = class
 	r.resetRRs()
 	return r
 }
 
 func (w *MessageWriter) resetRRs() {
+	w.namemap = make(map[string]uint16)
 	w.payload.Reset()
 	w.DH.QDCount = 1
-	XfrName(w.payload, &w.name, false)
-	XfrUInt16(w.payload, uint16(w.qtype))
+	w.XfrName(w.payload, &w.name, true)
+	XfrUInt16(w.payload, uint16(w.dnstype))
 	XfrUInt16(w.payload, uint16(w.class))
 }
 
-func XfrUInt32(w *bytes.Buffer, val uint32) {
-	binary.Write(w, binary.BigEndian, val)
-}
+func (w *MessageWriter) XfrName(b *bytes.Buffer, name *Name, compress bool) {
 
-func XfrUInt16(w *bytes.Buffer, val uint16) {
-	binary.Write(w, binary.BigEndian, val)
-}
-
-func XfrUInt8(w *bytes.Buffer, val uint8) {
-	w.WriteByte(val)
-}
-
-func XfrBlob(w *bytes.Buffer, data []byte) {
-	w.Write(data)
-}
-
-func XfrName(w *bytes.Buffer, a *Name, compress bool) {
-	for e := a.Name.Front(); e != nil; e = e.Next() {
+	for e := name.Name.Front(); e != nil; e = e.Next() {
+		if compress {
+			tname := NewNameFromTail(e);
+			pos, ok := w.namemap[tname.K()]
+			if ok {
+				// we have a tail we can use
+				XfrUInt8(b, uint8((pos>>8)|0xc0))
+				XfrUInt8(b, uint8(pos&0xff))
+				//fmt.Printf("%s map is %v\n", name.String(), w.namemap)
+				return
+			} else {
+				pos := w.payload.Len()
+				if w.payload != b {
+					pos += b.Len() + 2
+				}
+				w.namemap[tname.K()] = uint16(pos + HeaderLen)
+			}
+		}
 		l := e.Value.(*Label)
-		XfrUInt8(w, uint8(l.Len()))
-		XfrBlob(w, l.Label)
+		XfrUInt8(b, uint8(l.Len()))
+		XfrBlob(b, l.Label)
 	}
-	XfrUInt8(w, uint8(0))
+	XfrUInt8(b, uint8(0))
+	if compress {
+		//fmt.Printf("%s map is %v\n", name.String(), w.namemap)
+	}
 }
 
-func (w *MessageWriter) Serialize() []byte {
-	if w.haveEDNS {
-		_ = w.putEDNS(w.maxsize+HeaderLen, w.rCode, w.doBit)
-		// XXX Handle does not fit case
-
-	}
+func (w *MessageWriter) bytes() []byte {
 	buf := new(bytes.Buffer)
 	buf.Grow(HeaderLen + w.payload.Len())
 
@@ -95,48 +126,68 @@ func (w *MessageWriter) Serialize() []byte {
 	return buf.Bytes()
 }
 
-func (w *MessageWriter) putEDNS(bufsize int, ercode RCode, doBit bool) bool {
-	available := w.maxsize - w.payload.Len()
-	if available >= 11 {
-		XfrUInt8(w.payload, 0)
-		XfrUInt16(w.payload, OPT) // 'root' Name, our type
-		XfrUInt16(w.payload, uint16(bufsize))
-		XfrUInt8(w.payload, uint8(ercode)>>4)
-		XfrUInt8(w.payload, 0)
-		var bitval uint8 = 0
-		if doBit {
-			bitval = 0x80
+func (w *MessageWriter) Serialize() []byte {
+	if w.haveEDNS {
+		ok := w.putEDNS(w.maxsize+HeaderLen, w.erCode, w.doBit)
+		if !ok {
+			// Handle does not fit case by just returning an EDNS record with the len we would have needed
+			act := NewMessageWriter(&w.name, w.dnstype, w.class, HeaderLen + w.payload.Len())
+			act.DH = w.DH
+			act.putEDNS(HeaderLen+w.payload.Len(), w.erCode, w.doBit)
+			return act.bytes()
 		}
-		XfrUInt8(w.payload, bitval)
-		XfrUInt8(w.payload, 0)
-		XfrUInt16(w.payload, 0)
-		w.DH.ARCount++
+	}
+	return w.bytes()
+}
+
+func (w *MessageWriter) putEDNS(bufsize int, ercode RCode, doBit bool) bool {
+	current := w.payload.Len()
+	XfrUInt8(w.payload, 0)
+	XfrUInt16(w.payload, OPT) // 'root' Name, our type
+	XfrUInt16(w.payload, uint16(bufsize))
+	XfrUInt8(w.payload, uint8(ercode)>>4)
+	XfrUInt8(w.payload, 0)
+	var bitval uint8 = 0
+	if doBit {
+		bitval = 0x80
+	}
+	XfrUInt8(w.payload, bitval)
+	XfrUInt8(w.payload, 0)
+	XfrUInt16(w.payload, 0)
+	w.DH.ARCount++
+	if w.payload.Len() <= w.maxsize {
 		return true
 	}
+	// It did not fit, reset and report
+	w.payload.Truncate(current);
 	return false
 }
 
 func (w *MessageWriter) SetEDNS(newsize int, doBit bool, rcode RCode) {
 	if newsize > HeaderLen {
 		w.maxsize = newsize - HeaderLen
-		// XXX Handle actual resizing
 	}
 	w.doBit = doBit
-	w.rCode = rcode
+	w.erCode = rcode
 	w.haveEDNS = true
 }
 
 func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, class Class, data RRGen) error {
-	//cursize := w.payloadpos
-	XfrName(w.payload, name, true)
+	current := w.payload.Len()
+
+	w.XfrName(w.payload, name, true)
 	XfrUInt16(w.payload, uint16(dnstype))
 	XfrUInt16(w.payload, uint16(class))
 	XfrUInt32(w.payload, ttl)
-	bytes := data.ToMessage()
+	bytes := data.ToMessage(w)
 	XfrUInt16(w.payload, uint16(len(bytes)))
 	XfrBlob(w.payload, bytes)
 
-	// XXX Error checking, did it fit?
+	if w.payload.Len() > w.maxsize {
+		// It did not fit, reset and report
+		w.payload.Truncate(current)
+		return fmt.Errorf("Message did not fit")
+	}
 	switch s {
 	case Question:
 		return fmt.Errorf("Can't add questions to a DNS Message with putRR")
@@ -239,18 +290,6 @@ func (r *MessageReader) skipRRs(num int) {
 	}
 }
 
-type RRec struct {
-	Section Section
-	Name    Name
-	Type    Type
-	TTL     uint32
-	Class   Class
-	Data    RRGen
-}
-
-func (r *RRec) String() string {
-	return fmt.Sprintf("%-30s\t%d\t%v\t%v", &r.Name, r.TTL, r.Type, r.Data)
-}
 
 func (r *MessageReader) GetRR() (rrec *RRec) {
 	if r.payloadpos == uint16(len(r.payload)) {

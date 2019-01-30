@@ -23,9 +23,9 @@ import (
 )
 
 type (
-	RCode   uint8
-	Type    uint16
-	Class   uint16
+	RCode uint8
+	Type uint16
+	Class uint16
 	Section uint16
 
 	Label struct {
@@ -33,6 +33,7 @@ type (
 	}
 	Name struct {
 		Name list.List
+		key  string
 	}
 
 	// We keep the header in host native format. Code that write or reads it from the
@@ -232,6 +233,38 @@ func NewName(labels []string) *Name {
 	return n
 }
 
+func NewNameFromTail(labels *list.Element) *Name {
+	n := new(Name)
+	for ; labels != nil; labels = labels.Next() {
+		l := labels.Value.(*Label)
+		n.Name.PushBack(l)
+	}
+	return n
+}
+
+func (n *Name) K() string {
+	if n.key == "" {
+		n.key = n.string()
+	}
+	return n.key
+}
+
+func (n *Name) String() string {
+	return n.K()
+}
+
+func (a *Name) string() string {
+	if a.Empty() {
+		return "."
+	}
+	var b strings.Builder
+	for e := a.Name.Front(); e != nil; e = e.Next() {
+		b.WriteString(e.Value.(*Label).String())
+		b.WriteString(".")
+	}
+	return b.String()
+}
+
 func (n *Name) Len() int {
 	return n.Name.Len()
 }
@@ -261,10 +294,12 @@ func (a *Name) Append(b *Name) {
 	for e := b.Name.Front(); e != nil; e = e.Next() {
 		a.Name.PushBack(e.Value.(*Label))
 	}
+	a.key = a.string()
 }
 
 func (a *Name) PushBack(l *Label) {
 	a.Name.PushBack(l)
+	a.key = a.string()
 }
 
 func (n *Name) IsPartOf(root *Name) bool {
@@ -287,18 +322,6 @@ func (n *Name) IsPartOf(root *Name) bool {
 			return false
 		}
 	}
-}
-
-func (a *Name) String() string {
-	if a.Empty() {
-		return "."
-	}
-	var b strings.Builder
-	for e := a.Name.Front(); e != nil; e = e.Next() {
-		b.WriteString(e.Value.(*Label).String())
-		b.WriteString(".")
-	}
-	return b.String()
 }
 
 func MakeName(str string) *Name {
