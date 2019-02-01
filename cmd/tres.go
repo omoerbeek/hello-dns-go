@@ -560,6 +560,9 @@ func main() {
 	if len(res.Res) == 0 {
 		fmt.Printf("No data for %s %s\n", args[1], args[2])
 	} else {
+		for _, r := range res.Intermediates {
+			fmt.Printf("Intermediate %s\n", r.String())
+		}
 		for _, r := range res.Res {
 			fmt.Printf("Resolved %s\n", r.String())
 		}
