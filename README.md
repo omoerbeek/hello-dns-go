@@ -31,10 +31,11 @@ Compared to the code in hello-dns, hello-dns-go has some differences
 
 - `./tdig name type resolver:port`
 
-  where type is the DNS record type: (A, AAAA, NS, etc). For example: 
+  where type is the DNS record type: (A, AAAA, NS, etc) send a query to the specified reolver. IN this case that server will do the recursive query or retrieve the requested data from it's cache. For example: 
   
   `./tdig example.com A 127.0.0.1:53`
-- `./tres name type` to do a single shot resolve
+- `./tres name type` to do a single shot recursive resolve. This gives a nice idea on how much work is needed to resolve 
+  a name if no cache is being used.
 - `./tres ip:port` to run as a resolver listening on the specified IP:port combination.
   For example 
   
@@ -44,4 +45,8 @@ Compared to the code in hello-dns, hello-dns-go has some differences
   You can use `tdig` or any program to query the resolver:
   
   `./tdig example.com NS 127.0.0.1:1053`
+  
+  `tres` is a very verbose program. This is because it is a learning tool, not a resolver intended for any real-world use.
+  That said, it seems to work (albeit very slow since it has no cache) when I configure my laptop to use it as it's main 
+  resolver.
   
