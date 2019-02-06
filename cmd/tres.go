@@ -36,19 +36,9 @@ type (
 		Map map[string]map[string]net.IP
 	}
 
-	NameIP struct {
-		Name string
-		IP   net.IP
-	}
-
 	DNSResolver struct {
 		DNSBufSize int
 		logprefix string
-	}
-
-	ResolveResult struct {
-		Res           []*tdns.RRec
-		Intermediates []*tdns.RRec
 	}
 
 	NxdomainError struct{}
@@ -62,6 +52,9 @@ var (
 		"k.root-servers.net": net.ParseIP("193.0.14.129"),
 	}
 	roots NameIPSet = NewNameIPSet()
+
+	resultCache = tdns.NewResultCache()
+	rrCache = tdns.NewRRCache()
 )
 
 func (NxdomainError) Error() string {
@@ -116,10 +109,10 @@ func (ips *NameIPSet) Size() (sum int) {
 }
 
 // Flatten and randomize all the IPs we have
-func (ips *NameIPSet) RandomizeIPs() (ret []NameIP) {
+func (ips *NameIPSet) RandomizeIPs() (ret []tdns.NameIP) {
 	for name, i := range ips.Map {
 		for _, anip := range i {
-			ret = append(ret, NameIP{name, anip})
+			ret = append(ret, tdns.NameIP{name, anip})
 		}
 	}
 	mrand.Shuffle(len(ret), func(i, j int) {
@@ -242,13 +235,13 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 
 		if doTCP {
 			if reader, err = res.sendTCPQuery(nsip, writer); err != nil {
-				res.log("%d %s INCREASING BADNESSS", tries, server.String())
+				res.log("%d %s increasing badnesss", tries, server.String())
 				server.Bad()
 				return
 			}
 		} else {
 			if reader, err = res.sendUDPQuery(nsip, writer); err != nil {
-				res.log("%d %s INCREASING BADNESSS", tries, server.String())
+				res.log("%d %s increasing badnesss", tries, server.String())
 				doTCP = true
 				server.Bad()
 				continue
@@ -280,14 +273,37 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 	return nil, fmt.Errorf("Giving up on %s", nsip.String())
 }
 
-func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret ResolveResult, err error) {
+func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret tdns.ResolveResult, err error) {
 	oldprefix := resolver.logprefix
 	resolver.logprefix = fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
-	defer func () { resolver.logprefix = oldprefix }()
+	defer func() { resolver.logprefix = oldprefix }()
+
+	cached := resultCache.Get(name, dnstype)
+	if cached != nil {
+		resolver.log("Found in resultCache")
+		return *cached, nil
+	}
+	result, err := resolver.resolveAt1(name, dnstype, depth, auth, mservers)
+	if err == nil {
+		resultCache.Put(name, dnstype, &result)
+	}
+	return result, err
+}
+
+func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret tdns.ResolveResult, err error) {
 
 	resolver.log("Starting query at authority = %s, have %d addresses to try", auth, mservers.Size())
 
-	servers := mservers.RandomizeIPs()
+
+	nsservers := rrCache.GetNS(name)
+
+	var servers []tdns.NameIP
+	if nsservers != nil {
+		servers = nsservers
+	} else {
+		servers = mservers.RandomizeIPs()
+	}
+
 
 	for serverindex, server := range servers {
 		var newAuth tdns.Name
@@ -330,7 +346,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 		var addresses = NewNameIPSet()
 
 		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
-			resolver.log("%s", rrec)
+			resolver.log("RR: %s", rrec)
 
 			if reader.DH.Bit(tdns.AaMask) == 1 {
 				// Authoritative answer. We trust this.
@@ -359,7 +375,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						}
 					}
 
-					var chaseres ResolveResult
+					var chaseres tdns.ResolveResult
 					chaseres, err = resolver.resolveAt(target, dnstype, depth+1, tdns.MakeName(""), &roots)
 					if err == nil {
 						ret.Res = chaseres.Res
@@ -377,6 +393,7 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						nsname := rrec.Data.(*tdns.NSGen).NSName
 						nsses[nsname.K()] = nsname
 						newAuth = rrec.Name
+						rrCache.Put(rrec)
 					} else {
 						resolver.log("Authoritative server gave us NS record to which this query does not belong")
 					}
@@ -385,8 +402,10 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 						switch a := rrec.Data.(type) {
 						case *tdns.AGen:
 							addresses.Add(&rrec.Name, a.IP)
+							rrCache.Put(rrec)
 						case *tdns.AAAAGen:
 							addresses.Add(&rrec.Name, a.IP)
+							rrCache.Put(rrec)
 						}
 					} else {
 						resolver.log("Not accepting IP address of %s: out of authority of this server", rrec.Name.String())
@@ -443,8 +462,10 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 					switch a := res.Data.(type) {
 					case *tdns.AGen:
 						newns.Add(&n, a.IP)
+						rrCache.Put(res)
 					case *tdns.AAAAGen:
 						newns.Add(&n, a.IP)
+						rrCache.Put(res)
 					}
 				}
 				if newns.Size() == 0 {
@@ -519,7 +540,11 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 	for _, r := range res.Res {
 		resolver.log("%s", r.String())
 	}
-	resolver.log("BAD server map %s\n", tdns.BadServersInfo())
+	resolver.log("BAD server map %s", tdns.BadServersInfo())
+	resolver.log("RESULTCACHE has %d entries", resultCache.Size())
+	//resolver.log("RESULTCACHE\n%s", resultCache.String())
+	resolver.log("RRCACHE has %d entries", rrCache.Size())
+	//resolver.log("RRCACHE\n%s", rrCache.String())
 
 	// XXX numqueries
 

@@ -23,14 +23,21 @@ import (
 	"io"
 )
 
-type RRec struct {
-	Section Section
-	Name    Name
-	Type    Type
-	TTL     uint32
-	Class   Class
-	Data    RRGen
-}
+type (
+	RRec struct {
+		Section Section
+		Name    Name
+		Type    Type
+		TTL     uint32
+		Class   Class
+		Data    RRGen
+	}
+
+	ResolveResult struct {
+		Res           []*RRec
+		Intermediates []*RRec
+	}
+)
 
 func (r *RRec) String() string {
 	return fmt.Sprintf("%-30s\t%d\t%v\t%v", &r.Name, r.TTL, r.Type, r.Data)
@@ -62,7 +69,7 @@ type MessageWriter struct {
 	erCode   RCode
 	payload  *bytes.Buffer
 	maxsize  int
-	namemap map[string]uint16
+	namemap  map[string]uint16
 }
 
 func NewMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *MessageWriter {
@@ -131,7 +138,7 @@ func (w *MessageWriter) Serialize() []byte {
 		ok := w.putEDNS(w.maxsize+HeaderLen, w.erCode, w.doBit)
 		if !ok {
 			// Handle does not fit case by just returning an EDNS record with the len we would have needed
-			act := NewMessageWriter(&w.name, w.dnstype, w.class, HeaderLen + w.payload.Len())
+			act := NewMessageWriter(&w.name, w.dnstype, w.class, HeaderLen+w.payload.Len())
 			act.DH = w.DH
 			act.putEDNS(HeaderLen+w.payload.Len(), w.erCode, w.doBit)
 			return act.bytes()
@@ -289,7 +296,6 @@ func (r *MessageReader) skipRRs(num int) {
 		}
 	}
 }
-
 
 func (r *MessageReader) GetRR() (rrec *RRec) {
 	if r.payloadpos == uint16(len(r.payload)) {

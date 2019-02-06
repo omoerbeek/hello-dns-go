@@ -32,7 +32,7 @@ type (
 		Type	Type
 		// skip Class
 	}
-	Status struct {
+	badstatus struct {
 		Count int
 		TTD   time.Time
 	}
@@ -44,7 +44,7 @@ const (
 
 var (
 	badmutex sync.Mutex
-	badaddresses = make(map[string]Status)
+	badaddresses = make(map[string]badstatus)
 	BadCacheDuration = DefaultBadCacheSeconds * time.Second
 )
 
@@ -76,14 +76,14 @@ func (a *BadServer) Bad() {
 	item, ok := badaddresses[key]
 
 	if (ok) {
-		badaddresses[key] = Status{Count: item.Count + 1, TTD: time.Now().Add(BadCacheDuration)}
+		badaddresses[key] = badstatus{Count: item.Count + 1, TTD: time.Now().Add(BadCacheDuration)}
 	} else {
-		badaddresses[key] = Status{Count: 1, TTD: time.Now().Add(BadCacheDuration)}
+		badaddresses[key] = badstatus{Count: 1, TTD: time.Now().Add(BadCacheDuration)}
 	}
 	badmutex.Unlock()
 }
 
-func (a *Status) IsBad() bool {
+func (a *badstatus) IsBad() bool {
 	return a.Count >= 3
 }
 
