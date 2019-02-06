@@ -202,21 +202,26 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 	doEDNS := true
 
 	for tries := 0; tries < 4; tries++ {
-		// We declare a server including the fields mentioned in RFC 2308 7.2 plus TCP and EDNS
-		server := tdns.BadServer{Address:nsip, TCP:doTCP, EDNS:doEDNS, Name:name, Type:dnstype}
+		// We could identify a server using the fields mentioned in RFC 2308 7.2 plus TCP and EDNS
+		// But lets diffrentiate between UDP/TCP and EDNS only
+		server := tdns.BadServer{Address:nsip, TCP:doTCP, EDNS:doEDNS, Name:nil, Type:0}
 		if server.IsBad() {
-			res.log("%s %v %v is BAD, lets see if there's another", nsip, doTCP, doEDNS)
+			res.log("%s tcp=%v edns=%v is BAD, lets see if there's another", nsip, doTCP, doEDNS)
 			if !doTCP {
 				if doEDNS {
 					doEDNS = false;
+					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
 					continue
 				} else {
 					doTCP = true
+					doEDNS = true
+					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
 					continue
 				}
 			} else {
 				if doEDNS {
 					doEDNS = false
+					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
 					continue
 				} else {
 					return nil, fmt.Errorf("no non-BAD servers left")

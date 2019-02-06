@@ -49,13 +49,13 @@ var (
 )
 
 func (b *BadServer) String() string {
-	tcpkey := 0
+	tcpkey := "udp"
 	if b.TCP  {
-		tcpkey = 1
+		tcpkey = "tcp"
 	}
-	ednskey := 0
+	ednskey := ""
 	if b.EDNS {
-		ednskey = 1
+		ednskey = "edns"
 	}
 
 	namekey := ""
@@ -66,7 +66,7 @@ func (b *BadServer) String() string {
 	if b.Type != 0 {
 		typekey = b.Type.String()
 	}
-	return fmt.Sprintf("%s/%d/%d/%s/%s", b.Address.String(), tcpkey, ednskey, namekey, typekey)
+	return fmt.Sprintf("%s/%s/%s/%s/%s", b.Address.String(), tcpkey, ednskey, namekey, typekey)
 }
 
 
@@ -124,7 +124,7 @@ func RunBadServers() {
 }
 
 func BadServersInfo() string {
-	list := make([]string, 0)
+	var list []string
 	badmutex.Lock()
 	for k, v := range badaddresses {
 		if v.IsBad() {
