@@ -144,7 +144,8 @@ func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 
 	data := make([]byte, res.DNSBufSize)
 	var n int
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	// RFC 2308 talks about 120 seconds, I suppose that is not workable...
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if n, err = conn.Read(data); err != nil {
 		return
 	}
@@ -164,7 +165,8 @@ func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	conn.(*net.TCPConn).SetNoDelay(true)
 
 	msg := writer.Serialize()
-	conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+	// RFC 2308 talks about 120 seconds, I suppose that is not workable...
+	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 	if err = binary.Write(conn, binary.BigEndian, uint16(len(msg))); err != nil {
 		return
 	}
@@ -179,7 +181,8 @@ func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	}
 	data := make([]byte, l)
 	var n int
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	// RFC 2308 talks about 120 seconds, I suppose that is not workable...
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if n, err = conn.Read(data); err != nil {
 		return
 	}
@@ -199,6 +202,27 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 	doEDNS := true
 
 	for tries := 0; tries < 4; tries++ {
+		// We declare a server including the fields mentioned in RFC 2308 7.2 plus TCP and EDNS
+		server := tdns.BadServer{Address:nsip, TCP:doTCP, EDNS:doEDNS, Name:name, Type:dnstype}
+		if server.IsBad() {
+			res.log("%s %v %v is BAD, lets see if there's another", nsip, doTCP, doEDNS)
+			if !doTCP {
+				if doEDNS {
+					doEDNS = false;
+					continue
+				} else {
+					doTCP = true
+					continue
+				}
+			} else {
+				if doEDNS {
+					doEDNS = false
+					continue
+				} else {
+					return nil, fmt.Errorf("no non-BAD servers left")
+				}
+			}
+		}
 
 		writer := tdns.NewMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
 
@@ -210,13 +234,19 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 		r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
 		writer.DH.Id = uint16(r.Int64())
 
+
 		if doTCP {
 			if reader, err = res.sendTCPQuery(nsip, writer); err != nil {
+				res.log("%d %s INCREASING BADNESSS", tries, server.String())
+				server.Bad()
 				return
 			}
 		} else {
 			if reader, err = res.sendUDPQuery(nsip, writer); err != nil {
-				return
+				res.log("%d %s INCREASING BADNESSS", tries, server.String())
+				doTCP = true
+				server.Bad()
+				continue
 			}
 		}
 		// for security reasons, you really need this
@@ -239,9 +269,10 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 			doTCP = true
 			continue
 		}
+		// It was an answer to our satisfaction
 		return
 	}
-	return
+	return nil, fmt.Errorf("Giving up on %s", nsip.String())
 }
 
 func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret ResolveResult, err error) {
@@ -483,6 +514,8 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 	for _, r := range res.Res {
 		resolver.log("%s", r.String())
 	}
+	resolver.log("BAD server map %s\n", tdns.BadServersInfo())
+
 	// XXX numqueries
 
 	switch err.(type) {
@@ -541,6 +574,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "       tres ip:port\n")
 		os.Exit(1)
 	}
+
+	go tdns.RunBadServers()
+
 	resolveHints()
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
 
