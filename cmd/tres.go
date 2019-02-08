@@ -53,6 +53,7 @@ var (
 	}
 	roots NameIPSet = NewNameIPSet()
 
+	badServers = tdns.NewBadServerCache()
 	resultCache = tdns.NewResultCache()
 	rrCache = tdns.NewRRCache()
 )
@@ -198,7 +199,7 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 		// We could identify a server using the fields mentioned in RFC 2308 7.2 plus TCP and EDNS
 		// But lets diffrentiate between UDP/TCP and EDNS only
 		server := tdns.BadServer{Address:nsip, TCP:doTCP, EDNS:doEDNS, Name:nil, Type:0}
-		if server.IsBad() {
+		if badServers.IsBad(&server) {
 			res.log("%s tcp=%v edns=%v is BAD, lets see if there's another", nsip, doTCP, doEDNS)
 			if !doTCP {
 				if doEDNS {
@@ -236,14 +237,14 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 		if doTCP {
 			if reader, err = res.sendTCPQuery(nsip, writer); err != nil {
 				res.log("%d %s increasing badnesss", tries, server.String())
-				server.Bad()
+				badServers.Bad(&server)
 				return
 			}
 		} else {
 			if reader, err = res.sendUDPQuery(nsip, writer); err != nil {
 				res.log("%d %s increasing badnesss", tries, server.String())
 				doTCP = true
-				server.Bad()
+				badServers.Bad(&server)
 				continue
 			}
 		}
@@ -348,6 +349,32 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
 			resolver.log("RR: %s", rrec)
 
+			// Pick up nameservers. We check if glue records are within the authority
+			// of what we approached this server for.
+			if rrec.Section == tdns.Authority && rrec.Type == tdns.NS {
+				if name.IsPartOf(&rrec.Name) {
+					nsname := rrec.Data.(*tdns.NSGen).NSName
+					nsses[nsname.K()] = nsname
+					newAuth = rrec.Name
+					rrCache.Put(rrec)
+				} else {
+					resolver.log("Authoritative server gave us NS record to which this query does not belong")
+				}
+			} else if rrec.Section == tdns.Additional && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
+				if rrec.Name.IsPartOf(auth) {
+					switch a := rrec.Data.(type) {
+					case *tdns.AGen:
+						addresses.Add(&rrec.Name, a.IP)
+						rrCache.Put(rrec)
+					case *tdns.AAAAGen:
+						addresses.Add(&rrec.Name, a.IP)
+						rrCache.Put(rrec)
+					}
+				} else {
+					resolver.log("Not accepting IP address of %s: out of authority of this server", rrec.Name.String())
+				}
+			}
+
 			if reader.DH.Bit(tdns.AaMask) == 1 {
 				// Authoritative answer. We trust this.
 				if rrec.Section == tdns.Answer && name.Equals(&rrec.Name) && dnstype == rrec.Type {
@@ -386,45 +413,23 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					return
 				}
 			} else {
-				// Not authorative answer, pick up nameservers. We check if glue records are within the authority
-				// of what we approached this server for.
-				if rrec.Section == tdns.Authority && rrec.Type == tdns.NS {
-					if name.IsPartOf(&rrec.Name) {
-						nsname := rrec.Data.(*tdns.NSGen).NSName
-						nsses[nsname.K()] = nsname
-						newAuth = rrec.Name
-						rrCache.Put(rrec)
-					} else {
-						resolver.log("Authoritative server gave us NS record to which this query does not belong")
-					}
-				} else if rrec.Section == tdns.Additional && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
-					if rrec.Name.IsPartOf(auth) {
-						switch a := rrec.Data.(type) {
-						case *tdns.AGen:
-							addresses.Add(&rrec.Name, a.IP)
-							rrCache.Put(rrec)
-						case *tdns.AAAAGen:
-							addresses.Add(&rrec.Name, a.IP)
-							rrCache.Put(rrec)
-						}
-					} else {
-						resolver.log("Not accepting IP address of %s: out of authority of this server", rrec.Name.String())
-					}
-				}
 			}
 
 		}
+
+		numa := addresses.Size()
+		numns := len(nsses)
+
 		if len(ret.Res) > 0 {
 			resolver.log("Done, returning %d results, %d intermediate", len(ret.Res), len(ret.Intermediates))
 			return
-		} else if reader.DH.Bit(tdns.AaMask) == 1 {
+		} else if reader.DH.Bit(tdns.AaMask) == 1 && numa == 0 && numns == 0 {
 			resolver.log("No data response")
 			err = NodataError{}
 			return
 		}
 
 		resolver.log("We got delegated to %d %s nameserver names", len(nsses), newAuth.String())
-		numa := addresses.Size()
 		if numa > 0 {
 			resolver.log("We have %d addresses to iterate to: %s", numa, addresses.String())
 			res2, err2 := resolver.resolveAt(name, dnstype, depth+1, &newAuth, &addresses)
@@ -540,11 +545,9 @@ func (r *DNSResolver) processQuery(conn *net.UDPConn, address *net.UDPAddr, read
 	for _, r := range res.Res {
 		resolver.log("%s", r.String())
 	}
-	resolver.log("BAD server map %s", tdns.BadServersInfo())
-	resolver.log("RESULTCACHE has %d entries", resultCache.Size())
-	//resolver.log("RESULTCACHE\n%s", resultCache.String())
-	resolver.log("RRCACHE has %d entries", rrCache.Size())
-	//resolver.log("RRCACHE\n%s", rrCache.String())
+	resolver.log("BadServer: %s", badServers.Info())
+	resolver.log("ResultCache: %s", resultCache.Info())
+	resolver.log("RRCache: %s", rrCache.Info())
 
 	// XXX numqueries
 
@@ -605,7 +608,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	go tdns.RunBadServers()
+	go badServers.Run()
+	go resultCache.Run()
+	go rrCache.Run()
 
 	resolveHints()
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())

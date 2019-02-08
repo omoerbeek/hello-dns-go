@@ -197,15 +197,15 @@ func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, c
 	}
 	switch s {
 	case Question:
-		return fmt.Errorf("Can't add questions to a DNS Message with putRR")
+		return fmt.Errorf("Can'timestamp add questions to a DNS Message with putRR")
 	case Answer:
 		if w.DH.NSCount > 0 || w.DH.ARCount > 0 {
-			return fmt.Errorf("Can't add answer RRs out of order to a DNS Messa ge")
+			return fmt.Errorf("Can'timestamp add answer RRs out of order to a DNS Messa ge")
 		}
 		w.DH.ANCount++
 	case Authority:
 		if w.DH.ARCount > 0 {
-			return fmt.Errorf("Can't add authority RRs out of order to a DNS Message")
+			return fmt.Errorf("Can'timestamp add authority RRs out of order to a DNS Message")
 		}
 		w.DH.NSCount++
 	case Additional:

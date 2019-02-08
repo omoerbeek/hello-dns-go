@@ -28,13 +28,19 @@ type (
 		Address net.IP
 		TCP     bool
 		EDNS    bool
-		Name	*Name
-		Type	Type
+		Name    *Name
+		Type    Type
 		// skip Class
 	}
 	badstatus struct {
 		Count int
 		TTD   time.Time
+	}
+
+	BadServerCache struct {
+		badmutex sync.Mutex
+		badaddresses map[string]badstatus
+		BadCacheDuration time.Duration
 	}
 )
 
@@ -42,15 +48,14 @@ const (
 	DefaultBadCacheSeconds = 5 * 60 // per RFC 2308
 )
 
-var (
-	badmutex sync.Mutex
-	badaddresses = make(map[string]badstatus)
-	BadCacheDuration = DefaultBadCacheSeconds * time.Second
-)
+func NewBadServerCache() BadServerCache {
+	return BadServerCache{badaddresses: make(map[string]badstatus), BadCacheDuration: DefaultBadCacheSeconds * time.Second}
+}
+
 
 func (b *BadServer) String() string {
 	tcpkey := "udp"
-	if b.TCP  {
+	if b.TCP {
 		tcpkey = "tcp"
 	}
 	ednskey := ""
@@ -69,28 +74,27 @@ func (b *BadServer) String() string {
 	return fmt.Sprintf("%s/%s/%s/%s/%s", b.Address.String(), tcpkey, ednskey, namekey, typekey)
 }
 
-
-func (a *BadServer) Bad() {
+func (b* BadServerCache) Bad(a *BadServer) {
 	key := a.String()
-	badmutex.Lock()
-	item, ok := badaddresses[key]
+	b.badmutex.Lock()
+	item, ok := b.badaddresses[key]
 
 	if (ok) {
-		badaddresses[key] = badstatus{Count: item.Count + 1, TTD: time.Now().Add(BadCacheDuration)}
+		b.badaddresses[key] = badstatus{Count: item.Count + 1, TTD: time.Now().Add(b.BadCacheDuration)}
 	} else {
-		badaddresses[key] = badstatus{Count: 1, TTD: time.Now().Add(BadCacheDuration)}
+		b.badaddresses[key] = badstatus{Count: 1, TTD: time.Now().Add(b.BadCacheDuration)}
 	}
-	badmutex.Unlock()
+	b.badmutex.Unlock()
 }
 
 func (a *badstatus) IsBad() bool {
 	return a.Count >= 3
 }
 
-func (a *BadServer) IsBad() bool {
-	badmutex.Lock()
-	item, ok := badaddresses[a.String()]
-	badmutex.Unlock()
+func (b* BadServerCache) IsBad(a *BadServer) bool {
+	b.badmutex.Lock()
+	item, ok := b.badaddresses[a.String()]
+	b.badmutex.Unlock()
 
 	if (ok) {
 		return item.IsBad()
@@ -99,38 +103,40 @@ func (a *BadServer) IsBad() bool {
 	}
 }
 
-func cleanupBad() {
+func (b* BadServerCache) cleanupBad() {
 	now := time.Now()
-	badmutex.Lock()
-	for key, value := range badaddresses {
+	b.badmutex.Lock()
+	for key, value := range b.badaddresses {
 		if now.After(value.TTD) {
-			delete(badaddresses, key)
+			delete(b.badaddresses, key)
 		}
 	}
-	badmutex.Unlock()
+	b.badmutex.Unlock()
 }
-func RunBadServers() {
+
+func (b* BadServerCache) Run() {
 	period := 10 * time.Second
-	if period > BadCacheDuration {
-		period = BadCacheDuration / 2
+	if period > b.BadCacheDuration {
+		period = b.BadCacheDuration / 2
 	}
 	tick := time.Tick(period)
 	for {
 		select {
 		case <-tick:
-			cleanupBad()
+			b.cleanupBad()
 		}
 	}
 }
 
-func BadServersInfo() string {
+func (b* BadServerCache) Info() string {
 	var list []string
-	badmutex.Lock()
-	for k, v := range badaddresses {
+	b.badmutex.Lock()
+	for k, v := range b.badaddresses {
 		if v.IsBad() {
 			list = append(list, k)
 		}
 	}
-	badmutex.Unlock()
-	return fmt.Sprintf("Number of bad servers: %d/%d\n%v", len(badaddresses), len(list), list)
+	lb := len(b.badaddresses)
+	b.badmutex.Unlock()
+	return fmt.Sprintf("Number of bad servers: %d/%d", len(list), lb)
 }

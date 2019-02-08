@@ -26,27 +26,30 @@ import (
 func TestBadServer (t *testing.T) {
 	a := net.ParseIP("127.0.0.1")
 	s := BadServer{Address: a, TCP:false, EDNS:false, Name:nil, Type:A }
-	if s.IsBad() {
+	if bs.IsBad(&s) {
 		t.Error("s is badaddresses")
 	}
-	s.Bad()
-	if s.IsBad() {
+	bs.Bad(&s)
+	if bs.IsBad(&s) {
 		t.Error("s is badaddresses")
 	}
-	s.Bad()
-	s.Bad()
-	s.Bad()
-	if !s.IsBad() {
-		t.Errorf("s is not badaddresses %v", badaddresses)
+	bs.Bad(&s)
+	bs.Bad(&s)
+	bs.Bad(&s)
+	if !bs.IsBad(&s) {
+		t.Errorf("s is not badaddresses %v", bs.badaddresses)
 	}
-	time.Sleep(2*BadCacheDuration)
-	if s.IsBad() {
-		t.Errorf("s is bad after timeout %v", badaddresses)
+	time.Sleep(2*bs.BadCacheDuration)
+	if bs.IsBad(&s) {
+		t.Errorf("s is bad after timeout %v", bs.badaddresses)
 	}
 }
 
+var bs BadServerCache
+
 func TestMain(m *testing.M) {
-	BadCacheDuration = 1 * time.Second
-	go RunBadServers()
+	bs = NewBadServerCache()
+	bs.BadCacheDuration = 1 * time.Second
+	go bs.Run()
 	os.Exit(m.Run())
 }

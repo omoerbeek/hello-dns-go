@@ -27,8 +27,8 @@ import (
 
 type (
 	resulttype struct {
-		r *ResolveResult
-		t time.Time
+		resolveResult *ResolveResult
+		timestamp time.Time
 	}
 	ResultCache struct {
 		mutex sync.Mutex
@@ -36,11 +36,6 @@ type (
 	}
 
 )
-
-
-const ()
-
-var ()
 
 
 func computeTTL(now, inserttime time.Time, recordttl uint32) uint32 {
@@ -74,7 +69,7 @@ func (r *ResultCache) String() string {
 func (c *ResultCache) Get(name *Name, dnstype Type) *ResolveResult {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 	c.mutex.Lock()
-	data, ok  := c.results[k]
+	results, ok  := c.results[k]
 	c.mutex.Unlock()
 
 	if !ok {
@@ -83,9 +78,10 @@ func (c *ResultCache) Get(name *Name, dnstype Type) *ResolveResult {
 
 	now := time.Now()
 	var ret ResolveResult
-	for _, v := range data.r.Intermediates {
-		newttl := computeTTL(now, data.t, v.TTL)
+	for _, v := range results.resolveResult.Intermediates {
+		newttl := computeTTL(now, results.timestamp, v.TTL)
 		if newttl < 1 {
+			// One expired result, no good
 			return nil
 		}
 		// Make a copy
@@ -93,9 +89,10 @@ func (c *ResultCache) Get(name *Name, dnstype Type) *ResolveResult {
 		data.TTL = newttl
 		ret.Intermediates = append(ret.Intermediates, &data)
 	}
-	for _, v := range data.r.Res {
-		newttl := computeTTL(now, data.t, v.TTL)
+	for _, v := range results.resolveResult.Res {
+		newttl := computeTTL(now, results.timestamp, v.TTL)
 		if newttl < 1 {
+			// One expired result, no good
 			return nil
 		}
 		// Make a copy
@@ -115,15 +112,57 @@ func (c *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult) {
 	c.mutex.Unlock()
 }
 
+func (c *ResultCache) Info() string {
+	c.mutex.Lock()
+	lb := len(c.results)
+	c.mutex.Unlock()
+	return fmt.Sprintf("Number entries in ResultCache: %d", lb)
+}
+
+// We're aggressive. The moment one RR expired, we zap the complete resultset
+// Ths is in line with the code in Get()
+func (c *ResultCache) cleanup() {
+	now := time.Now()
+	c.mutex.Lock()
+	for k, results := range c.results {
+		for _, v := range results.resolveResult.Intermediates {
+			newttl := computeTTL(now, results.timestamp, v.TTL)
+			if newttl < 1 {
+				delete(c.results, k)
+				continue
+			}
+		}
+		for _, v := range results.resolveResult.Res {
+			newttl := computeTTL(now, results.timestamp, v.TTL)
+			if newttl < 1 {
+				delete(c.results, k)
+				continue
+			}
+		}
+	}
+	c.mutex.Unlock()
+}
+
+func (c *ResultCache) Run() {
+	period := 10 * time.Second
+	tick := time.Tick(period)
+	for {
+		select {
+		case <-tick:
+			c.cleanup()
+		}
+	}
+}
+
 type (
-	cachetype struct {
-		r *RRec
-		t time.Time
+	cacheEntry struct {
+		rRec      *RRec
+		timestamp time.Time
 	}
 
 	RRCache struct {
 		mutex sync.Mutex
-		rr map[string][]cachetype
+		rr map[string]map[int]cacheEntry
 	}
 
 	NameIP struct {
@@ -132,8 +171,12 @@ type (
 	}
 )
 
+func (ce *cacheEntry) String() string {
+	return fmt.Sprintf("%s %v", ce.rRec.String(), ce.timestamp)
+}
+
 func NewRRCache() RRCache {
-	return RRCache{rr: make(map[string][]cachetype)}
+	return RRCache{rr: make(map[string]map[int]cacheEntry)}
 }
 
 func (r *RRCache) Size() int {
@@ -154,14 +197,17 @@ func (c *RRCache) Put(r *RRec) {
 	k := fmt.Sprintf("%s/%s", r.Name.K(), r.Type.String())
 
 	c.mutex.Lock()
-	c.rr[k] = append(c.rr[k], cachetype{r, t})
+	if c.rr[k] == nil {
+		c.rr[k] = make(map[int]cacheEntry)
+	}
+	c.rr[k][len(c.rr[k])] = cacheEntry{r, t}
 	c.mutex.Unlock()
 }
 
 func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, bool) {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 	c.mutex.Lock()
-	data, ok := c.rr[k]
+	rrset, ok := c.rr[k]
 	c.mutex.Unlock()
 
 	if !ok {
@@ -170,13 +216,13 @@ func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, bool) {
 
 	var ret []RRec
 	now := time.Now()
-	for _, ch := range data {
-		newttl := computeTTL(now, ch.t, ch.r.TTL)
+	for _, cachentry := range rrset {
+		newttl := computeTTL(now, cachentry.timestamp, cachentry.rRec.TTL)
 		if newttl < 1 {
 			continue // or return empty set?
 		}
 		// Make a copy
-		item := *ch.r
+		item := *cachentry.rRec
 		item.TTL = newttl
 		ret = append(ret, item)
 	}
@@ -225,3 +271,40 @@ func (c *RRCache) GetNS(name *Name) []NameIP {
 
 	return ret
 }
+
+func (c *RRCache) cleanup() {
+	c.mutex.Lock()
+	now := time.Now()
+	for key, cachentries := range c.rr {
+		for i, cachentry := range cachentries {
+			//fmt.Println(cachentry.String())
+			newttl := computeTTL(now, cachentry.timestamp, cachentry.rRec.TTL)
+			if newttl < 1 {
+				delete(cachentries, i)
+			}
+		}
+		if len(cachentries) == 0 {
+			delete(c.rr, key)
+		}
+	}
+	c.mutex.Unlock()
+}
+
+func (c *RRCache) Run() {
+	period := 10 * time.Second
+	tick := time.Tick(period)
+	for {
+		select {
+		case <-tick:
+			c.cleanup()
+		}
+	}
+}
+
+func (c *RRCache) Info() string {
+	c.mutex.Lock()
+	lb := len(c.rr)
+	c.mutex.Unlock()
+	return fmt.Sprintf("Number entries in RRCache: %d", lb)
+}
+
