@@ -23,9 +23,9 @@ import (
 )
 
 type (
-	RCode uint8
-	Type uint16
-	Class uint16
+	RCode   uint8
+	Type    uint16
+	Class   uint16
 	Section uint16
 
 	Label struct {

@@ -23,9 +23,9 @@ import (
 	"time"
 )
 
-func TestBadServer (t *testing.T) {
+func TestBadServer(t *testing.T) {
 	a := net.ParseIP("127.0.0.1")
-	s := BadServer{Address: a, TCP:false, EDNS:false, Name:nil, Type:A }
+	s := BadServer{Address: a, TCP: false, EDNS: false, Name: nil, Type: A}
 	if bs.IsBad(&s) {
 		t.Error("s is badaddresses")
 	}
@@ -39,7 +39,7 @@ func TestBadServer (t *testing.T) {
 	if !bs.IsBad(&s) {
 		t.Errorf("s is not badaddresses %v", bs.badaddresses)
 	}
-	time.Sleep(2*bs.BadCacheDuration)
+	time.Sleep(2 * bs.BadCacheDuration)
 	if bs.IsBad(&s) {
 		t.Errorf("s is bad after timeout %v", bs.badaddresses)
 	}

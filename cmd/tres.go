@@ -38,7 +38,7 @@ type (
 
 	DNSResolver struct {
 		DNSBufSize int
-		logprefix string
+		logprefix  string
 	}
 
 	NxdomainError struct{}
@@ -53,9 +53,9 @@ var (
 	}
 	roots NameIPSet = NewNameIPSet()
 
-	badServers = tdns.NewBadServerCache()
+	badServers  = tdns.NewBadServerCache()
 	resultCache = tdns.NewResultCache()
-	rrCache = tdns.NewRRCache()
+	rrCache     = tdns.NewRRCache()
 )
 
 func (NxdomainError) Error() string {
@@ -189,7 +189,6 @@ func (res *DNSResolver) log(format string, args ...interface{}) {
 	fmt.Printf("%s%s\n", res.logprefix, str)
 }
 
-
 func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.Type, depth int) (reader *tdns.MessageReader, err error) {
 
 	doTCP := false
@@ -198,12 +197,12 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 	for tries := 0; tries < 4; tries++ {
 		// We could identify a server using the fields mentioned in RFC 2308 7.2 plus TCP and EDNS
 		// But lets diffrentiate between UDP/TCP and EDNS only
-		server := tdns.BadServer{Address:nsip, TCP:doTCP, EDNS:doEDNS, Name:nil, Type:0}
+		server := tdns.BadServer{Address: nsip, TCP: doTCP, EDNS: doEDNS, Name: nil, Type: 0}
 		if badServers.IsBad(&server) {
 			res.log("%s tcp=%v edns=%v is BAD, lets see if there's another", nsip, doTCP, doEDNS)
 			if !doTCP {
 				if doEDNS {
-					doEDNS = false;
+					doEDNS = false
 					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
 					continue
 				} else {
@@ -232,7 +231,6 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 		// Use a good random source out of principle
 		r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
 		writer.DH.Id = uint16(r.Int64())
-
 
 		if doTCP {
 			if reader, err = res.sendTCPQuery(nsip, writer); err != nil {
@@ -295,7 +293,6 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 
 	resolver.log("Starting query at authority = %s, have %d addresses to try", auth, mservers.Size())
 
-
 	nsservers := rrCache.GetNS(name)
 
 	var servers []tdns.NameIP
@@ -304,7 +301,6 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 	} else {
 		servers = mservers.RandomizeIPs()
 	}
-
 
 	for serverindex, server := range servers {
 		var newAuth tdns.Name
@@ -595,7 +591,7 @@ func doListen(listenAddress string) {
 			fmt.Printf("Received packet from %s was not a query\n", address)
 			continue
 		}
-		r := DNSResolver{DNSBufSize:1500}
+		r := DNSResolver{DNSBufSize: 1500}
 		go r.processQuery(conn, address.(*net.UDPAddr), reader)
 	}
 }

@@ -28,15 +28,13 @@ import (
 type (
 	resulttype struct {
 		resolveResult *ResolveResult
-		timestamp time.Time
+		timestamp     time.Time
 	}
 	ResultCache struct {
-		mutex sync.Mutex
-		results     map[string]resulttype
+		mutex   sync.Mutex
+		results map[string]resulttype
 	}
-
 )
-
 
 func computeTTL(now, inserttime time.Time, recordttl uint32) uint32 {
 	passed := now.Sub(inserttime)
@@ -59,7 +57,7 @@ func (r *ResultCache) Size() int {
 
 func (r *ResultCache) String() string {
 	var buf bytes.Buffer
-	for n,_ := range r.results {
+	for n := range r.results {
 		buf.WriteString(n)
 		buf.WriteString("\n")
 	}
@@ -69,7 +67,7 @@ func (r *ResultCache) String() string {
 func (c *ResultCache) Get(name *Name, dnstype Type) *ResolveResult {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 	c.mutex.Lock()
-	results, ok  := c.results[k]
+	results, ok := c.results[k]
 	c.mutex.Unlock()
 
 	if !ok {
@@ -108,7 +106,7 @@ func (c *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult) {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 
 	c.mutex.Lock()
-	c.results[k] = resulttype{r, t};
+	c.results[k] = resulttype{r, t}
 	c.mutex.Unlock()
 }
 
@@ -162,7 +160,7 @@ type (
 
 	RRCache struct {
 		mutex sync.Mutex
-		rr map[string]map[int]cacheEntry
+		rr    map[string]map[int]cacheEntry
 	}
 
 	NameIP struct {
@@ -185,7 +183,7 @@ func (r *RRCache) Size() int {
 
 func (r *RRCache) String() string {
 	var buf bytes.Buffer
-	for n,_ := range r.rr {
+	for n := range r.rr {
 		buf.WriteString(n)
 		buf.WriteString("\n")
 	}
@@ -232,7 +230,7 @@ func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, bool) {
 
 func (c *RRCache) Get(name *Name, dnstype Type) ([]RRec, bool) {
 	for e := name.Name.Front(); e != nil; e = e.Next() {
-		tname := NewNameFromTail(e);
+		tname := NewNameFromTail(e)
 		set, ok := c.getByName(tname, dnstype)
 		if !ok {
 			continue
@@ -242,7 +240,6 @@ func (c *RRCache) Get(name *Name, dnstype Type) ([]RRec, bool) {
 	}
 	return nil, false
 }
-
 
 func (c *RRCache) GetNS(name *Name) []NameIP {
 	set, ok := c.Get(name, NS)
@@ -307,4 +304,3 @@ func (c *RRCache) Info() string {
 	c.mutex.Unlock()
 	return fmt.Sprintf("Number entries in RRCache: %d", lb)
 }
-

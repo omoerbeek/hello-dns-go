@@ -97,7 +97,7 @@ func (w *MessageWriter) XfrName(b *bytes.Buffer, name *Name, compress bool) {
 
 	for e := name.Name.Front(); e != nil; e = e.Next() {
 		if compress {
-			tname := NewNameFromTail(e);
+			tname := NewNameFromTail(e)
 			pos, ok := w.namemap[tname.K()]
 			if ok {
 				// we have a tail we can use
@@ -166,7 +166,7 @@ func (w *MessageWriter) putEDNS(bufsize int, ercode RCode, doBit bool) bool {
 		return true
 	}
 	// It did not fit, reset and report
-	w.payload.Truncate(current);
+	w.payload.Truncate(current)
 	return false
 }
 
