@@ -48,8 +48,8 @@ const (
 	DefaultBadCacheSeconds = 5 * 60 // per RFC 2308
 )
 
-func NewBadServerCache() BadServerCache {
-	return BadServerCache{badaddresses: make(map[string]badstatus), BadCacheDuration: DefaultBadCacheSeconds * time.Second}
+func NewBadServerCache() *BadServerCache {
+	return &BadServerCache{badaddresses: make(map[string]badstatus), BadCacheDuration: DefaultBadCacheSeconds * time.Second}
 }
 
 func (b *BadServer) String() string {

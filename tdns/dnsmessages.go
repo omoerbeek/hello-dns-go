@@ -34,7 +34,8 @@ type (
 	}
 
 	ResolveResult struct {
-		Res           []*RRec
+		Auths         []*RRec
+		Answers       []*RRec
 		Intermediates []*RRec
 	}
 )

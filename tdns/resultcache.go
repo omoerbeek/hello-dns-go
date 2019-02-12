@@ -25,14 +25,20 @@ import (
 	"time"
 )
 
+const (
+	DefaultNegCacheSeconds = 5 * 60
+)
+
 type (
 	resulttype struct {
-		resolveResult *ResolveResult
-		timestamp     time.Time
+		resolveResult  *ResolveResult
+		err            error
+		timestamp, ttd time.Time
 	}
 	ResultCache struct {
-		mutex   sync.Mutex
-		results map[string]resulttype
+		mutex            sync.Mutex
+		NegCacheDuration time.Duration
+		results          map[string]resulttype
 	}
 )
 
@@ -47,8 +53,8 @@ func computeTTL(now, inserttime time.Time, recordttl uint32) uint32 {
 	}
 }
 
-func NewResultCache() ResultCache {
-	return ResultCache{results: make(map[string]resulttype)}
+func NewResultCache() *ResultCache {
+	return &ResultCache{results: make(map[string]resulttype), NegCacheDuration: DefaultNegCacheSeconds * time.Second}
 }
 
 func (r *ResultCache) Size() int {
@@ -57,56 +63,72 @@ func (r *ResultCache) Size() int {
 
 func (r *ResultCache) String() string {
 	var buf bytes.Buffer
-	for n := range r.results {
+	for n, v := range r.results {
+		buf.WriteString(v.err.Error())
+		buf.WriteString(v.timestamp.String())
+		buf.WriteString("TTD: " + v.ttd.String())
 		buf.WriteString(n)
 		buf.WriteString("\n")
 	}
 	return buf.String()
 }
 
-func (c *ResultCache) Get(name *Name, dnstype Type) *ResolveResult {
+func (c *ResultCache) Get(name *Name, dnstype Type) (*ResolveResult, error) {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 	c.mutex.Lock()
 	results, ok := c.results[k]
 	c.mutex.Unlock()
 
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	now := time.Now()
 	var ret ResolveResult
+
+	for _, v := range results.resolveResult.Auths {
+		newttl := computeTTL(now, results.timestamp, v.TTL)
+		if newttl < 1 {
+			// One expired result, no good
+			return nil, nil
+		}
+		// Make a copy
+		data := *v
+		data.TTL = newttl
+		ret.Auths = append(ret.Intermediates, &data)
+	}
+
 	for _, v := range results.resolveResult.Intermediates {
 		newttl := computeTTL(now, results.timestamp, v.TTL)
 		if newttl < 1 {
 			// One expired result, no good
-			return nil
+			return nil, nil
 		}
 		// Make a copy
 		data := *v
 		data.TTL = newttl
 		ret.Intermediates = append(ret.Intermediates, &data)
 	}
-	for _, v := range results.resolveResult.Res {
+	for _, v := range results.resolveResult.Answers {
 		newttl := computeTTL(now, results.timestamp, v.TTL)
 		if newttl < 1 {
 			// One expired result, no good
-			return nil
+			return nil, nil
 		}
 		// Make a copy
 		data := *v
 		data.TTL = newttl
-		ret.Res = append(ret.Res, &data)
+		ret.Answers = append(ret.Answers, &data)
 	}
-	return &ret
+	return &ret, results.err
 }
 
-func (c *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult) {
+func (c *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult, err error) {
 	t := time.Now()
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 
 	c.mutex.Lock()
-	c.results[k] = resulttype{r, t}
+	c.results[k] = resulttype{resolveResult: r, err: err, timestamp: t, ttd: t.Add(c.NegCacheDuration)}
 	c.mutex.Unlock()
 }
 
@@ -123,6 +145,13 @@ func (c *ResultCache) cleanup() {
 	now := time.Now()
 	c.mutex.Lock()
 	for k, results := range c.results {
+		for _, v := range results.resolveResult.Auths {
+			newttl := computeTTL(now, results.timestamp, v.TTL)
+			if newttl < 1 {
+				delete(c.results, k)
+				continue
+			}
+		}
 		for _, v := range results.resolveResult.Intermediates {
 			newttl := computeTTL(now, results.timestamp, v.TTL)
 			if newttl < 1 {
@@ -130,7 +159,40 @@ func (c *ResultCache) cleanup() {
 				continue
 			}
 		}
-		for _, v := range results.resolveResult.Res {
+		for _, v := range results.resolveResult.Answers {
+			newttl := computeTTL(now, results.timestamp, v.TTL)
+			if newttl < 1 {
+				delete(c.results, k)
+				continue
+			}
+		}
+	}
+	c.mutex.Unlock()
+}
+
+func (c *ResultCache) cleanupNeg() {
+	now := time.Now()
+	c.mutex.Lock()
+	for k, results := range c.results {
+		if now.After(results.ttd) {
+			delete(c.results, k)
+			continue
+		}
+		for _, v := range results.resolveResult.Auths {
+			newttl := computeTTL(now, results.timestamp, v.TTL)
+			if newttl < 1 {
+				delete(c.results, k)
+				continue
+			}
+		}
+		for _, v := range results.resolveResult.Intermediates {
+			newttl := computeTTL(now, results.timestamp, v.TTL)
+			if newttl < 1 {
+				delete(c.results, k)
+				continue
+			}
+		}
+		for _, v := range results.resolveResult.Answers {
 			newttl := computeTTL(now, results.timestamp, v.TTL)
 			if newttl < 1 {
 				delete(c.results, k)
@@ -148,6 +210,20 @@ func (c *ResultCache) Run() {
 		select {
 		case <-tick:
 			c.cleanup()
+		}
+	}
+}
+
+func (c *ResultCache) RunNeg() {
+	period := 10 * time.Second
+	if period > c.NegCacheDuration {
+		period = c.NegCacheDuration / 2
+	}
+	tick := time.Tick(period)
+	for {
+		select {
+		case <-tick:
+			c.cleanupNeg()
 		}
 	}
 }
@@ -173,8 +249,8 @@ func (ce *cacheEntry) String() string {
 	return fmt.Sprintf("%s %v", ce.rRec.String(), ce.timestamp)
 }
 
-func NewRRCache() RRCache {
-	return RRCache{rr: make(map[string]map[int]cacheEntry)}
+func NewRRCache() *RRCache {
+	return &RRCache{rr: make(map[string]map[int]cacheEntry)}
 }
 
 func (r *RRCache) Size() int {
