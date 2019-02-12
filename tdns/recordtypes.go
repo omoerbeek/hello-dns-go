@@ -112,3 +112,56 @@ func (a *CNAMEGen) ToMessage(w *MessageWriter) []byte {
 func (a *CNAMEGen) String() string {
 	return a.CName.String()
 }
+
+type SOAGen struct {
+	MName, RName *Name
+	Serial, Refresh, Retry, Expire, Minimum uint32
+}
+
+func (s *SOAGen) Gen(r *MessageReader, l uint16) {
+	s.MName = r.getName(nil)
+	s.RName = r.getName(nil)
+	s.Serial = r.getUint32(nil)
+	s.Refresh = r.getUint32(nil)
+	s.Retry = r.getUint32(nil)
+	s.Expire = r.getUint32(nil)
+	s.Minimum = r.getUint32(nil)
+
+}
+
+func (s *SOAGen) ToMessage(w *MessageWriter) []byte {
+	var buf bytes.Buffer
+	w.XfrName(&buf, s.MName, true)
+	w.XfrName(&buf, s.RName, true)
+	XfrUInt32(&buf, s.Serial)
+	XfrUInt32(&buf, s.Refresh)
+	XfrUInt32(&buf, s.Retry)
+	XfrUInt32(&buf, s.Expire)
+	XfrUInt32(&buf, s.Minimum)
+	return buf.Bytes()
+}
+
+func (s *SOAGen) String() string {
+	return fmt.Sprintf("%s %s %d %d %d %d %d", s.MName, s.RName, s.Serial, s.Refresh, s.Retry, s.Expire, s.Minimum)
+}
+
+type MXGen struct {
+	Prio uint16
+	Name *Name
+}
+
+func (m *MXGen) Gen(r *MessageReader, l uint16) {
+	m.Prio = r.getUint16(nil)
+	m.Name = r.getName(nil)
+}
+
+func (m *MXGen) ToMessage(w *MessageWriter) []byte {
+	var buf bytes.Buffer
+	XfrUInt16(&buf, m.Prio)
+	w.XfrName(&buf, m.Name, true)
+	return buf.Bytes()
+}
+
+func (m *MXGen) String() string {
+	return fmt.Sprintf("%d %s", m.Prio, m.Name)
+}

@@ -330,6 +330,10 @@ func (r *MessageReader) GetRR() (rrec *RRec) {
 		result = new(NSGen)
 	case CNAME:
 		result = new(CNAMEGen)
+	case SOA:
+		result = new(SOAGen)
+	case MX:
+		result = new(MXGen)
 	default:
 		result = new(UnknownGen)
 	}
