@@ -215,11 +215,21 @@ func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, c
 	return nil
 }
 
-type MessageReader struct {
-	DH          Header
-	Name        Name
-	Type        Type
-	Class       Class
+type MessageReaderInterface interface {
+	Reset()
+	GetRR() (rrec *RRec)
+	DH() *Header
+	Name() *Name
+	Type() Type
+	Class() Class
+	FromCache() bool
+}
+
+type PacketReader struct {
+	dh          Header
+	name        *Name
+	dnstype     Type
+	class       Class
 	bufsize     uint16
 	doBit       bool
 	ednsVersion uint8
@@ -227,11 +237,32 @@ type MessageReader struct {
 	payload     []byte
 	payloadpos  uint16
 	rrpos       uint16
-	endofrecord uint16 // needed?
+	data        []byte
+	length      int
 }
 
-func (r *MessageReader) String() string {
-	header := r.DH.String()
+func (p *PacketReader) FromCache() bool {
+	return false
+}
+
+func (p *PacketReader) DH() *Header {
+	return &p.dh
+}
+
+func (p *PacketReader) Name() *Name {
+	return p.name
+}
+
+func (p *PacketReader) Type() Type {
+	return p.dnstype
+}
+
+func (p *PacketReader) Class() Class {
+	return p.class
+}
+
+func (r *PacketReader) String() string {
+	header := r.dh.String()
 	if r.haveEDNS {
 		b := 0
 		if r.doBit {
@@ -242,32 +273,42 @@ func (r *MessageReader) String() string {
 	return header
 }
 
-func NewMessagReader(data []byte, length int) (*MessageReader, error) {
+func NewMessagReader(data []byte, length int) (*PacketReader, error) {
 	if len(data) < HeaderLen || length < HeaderLen || len(data) < length {
 		return nil, io.ErrShortBuffer
 	}
-	r := new(MessageReader)
+	r := new(PacketReader)
 	err := r.Read(data, length)
 	return r, err
 }
 
-func (r *MessageReader) Read(data []byte, length int) error {
+func (r *PacketReader) Reset() {
+	if err := r.Read(r.data, r.length); err != nil {
+		panic(err.Error())
+	}
+}
+
+func (r *PacketReader) Read(data []byte, length int) error {
+	r.data = data
+	r.length = length
 	reader := bytes.NewReader(data)
-	err := binary.Read(reader, binary.BigEndian, &r.DH)
+	err := binary.Read(reader, binary.BigEndian, &r.dh)
 	if err != nil {
 		return err
 	}
 	r.payload = data[HeaderLen:length]
+	r.payloadpos = 0
+	r.rrpos = 0
 
-	if r.DH.QDCount > 0 {
-		r.Name = *r.getName(nil)
-		r.Type = Type(r.getUint16(nil))
-		r.Class = Class(r.getUint16(nil))
+	if r.dh.QDCount > 0 {
+		r.name = r.getName(nil)
+		r.dnstype = Type(r.getUint16(nil))
+		r.class = Class(r.getUint16(nil))
 	}
 
-	if r.DH.ARCount > 0 {
+	if r.dh.ARCount > 0 {
 		nowpos := r.payloadpos
-		r.skipRRs(int(r.DH.ANCount + r.DH.NSCount + r.DH.ARCount - 1))
+		r.skipRRs(int(r.dh.ANCount + r.dh.NSCount + r.dh.ARCount - 1))
 		if r.getUint8(nil) == 0 && Type(r.getUint16(nil)) == OPT {
 			r.bufsize = r.getUint16(nil)
 			r.getUint8(nil)
@@ -286,7 +327,7 @@ func (r *MessageReader) Read(data []byte, length int) error {
 	return err
 }
 
-func (r *MessageReader) skipRRs(num int) {
+func (r *PacketReader) skipRRs(num int) {
 	for i := 0; i < num; i++ {
 		r.getName(nil)
 		r.payloadpos += 8 // type, class , ttl
@@ -298,14 +339,14 @@ func (r *MessageReader) skipRRs(num int) {
 	}
 }
 
-func (r *MessageReader) GetRR() (rrec *RRec) {
+func (r *PacketReader) GetRR() (rrec *RRec) {
 	if r.payloadpos == uint16(len(r.payload)) {
 		return nil
 	}
 	rrec = new(RRec)
-	if r.rrpos < r.DH.ANCount {
+	if r.rrpos < r.dh.ANCount {
 		rrec.Section = Answer
-	} else if r.rrpos < r.DH.ANCount+r.DH.NSCount {
+	} else if r.rrpos < r.dh.ANCount+r.dh.NSCount {
 		rrec.Section = Authority
 	} else {
 		rrec.Section = Additional
@@ -318,7 +359,7 @@ func (r *MessageReader) GetRR() (rrec *RRec) {
 	rrec.Class = Class(r.getUint16(nil))
 	rrec.TTL = r.getUint32(nil)
 	l := r.getUint16(nil)
-	r.endofrecord = r.payloadpos + l
+	//r.endofrecord = r.payloadpos + l
 
 	var result RRGen
 	switch rrec.Type {
@@ -343,17 +384,16 @@ func (r *MessageReader) GetRR() (rrec *RRec) {
 	return rrec
 }
 
-func (r *MessageReader) getUint8(pos *uint16) uint8 {
+func (r *PacketReader) getUint8(pos *uint16) uint8 {
 	if pos == nil {
 		pos = &r.payloadpos
 	}
 	ret := r.payload[*pos]
 	*pos += 1
 	return ret
-
 }
 
-func (r *MessageReader) getUint16(pos *uint16) uint16 {
+func (r *PacketReader) getUint16(pos *uint16) uint16 {
 	if pos == nil {
 		pos = &r.payloadpos
 	}
@@ -362,7 +402,7 @@ func (r *MessageReader) getUint16(pos *uint16) uint16 {
 	return ret
 }
 
-func (r *MessageReader) getUint32(pos *uint16) uint32 {
+func (r *PacketReader) getUint32(pos *uint16) uint32 {
 	if pos == nil {
 		pos = &r.payloadpos
 	}
@@ -371,7 +411,7 @@ func (r *MessageReader) getUint32(pos *uint16) uint32 {
 	return ret
 }
 
-func (r *MessageReader) getBlob(size uint16, pos *uint16) []byte {
+func (r *PacketReader) getBlob(size uint16, pos *uint16) []byte {
 	if pos == nil {
 		pos = &r.payloadpos
 	}
@@ -381,7 +421,7 @@ func (r *MessageReader) getBlob(size uint16, pos *uint16) []byte {
 	return data
 }
 
-func (r *MessageReader) getName(pos *uint16) *Name {
+func (r *PacketReader) getName(pos *uint16) *Name {
 	ret := new(Name)
 	if pos == nil {
 		pos = &r.payloadpos

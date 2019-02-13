@@ -23,7 +23,7 @@ import (
 )
 
 type RRGen interface {
-	Gen(r *MessageReader, l uint16)
+	Gen(r *PacketReader, l uint16)
 	ToMessage(w *MessageWriter) []byte
 	String() string
 }
@@ -32,7 +32,7 @@ type UnknownGen struct {
 	Data []byte
 }
 
-func (a *UnknownGen) Gen(r *MessageReader, l uint16) {
+func (a *UnknownGen) Gen(r *PacketReader, l uint16) {
 	a.Data = r.getBlob(l, nil)
 }
 
@@ -48,7 +48,7 @@ type AGen struct {
 	IP net.IP
 }
 
-func (a *AGen) Gen(r *MessageReader, l uint16) {
+func (a *AGen) Gen(r *PacketReader, l uint16) {
 	data := r.getUint32(nil)
 	a.IP = []byte{byte(data >> 24), byte(data >> 16), byte(data >> 8), byte(data)}
 }
@@ -65,7 +65,7 @@ type AAAAGen struct {
 	IP net.IP
 }
 
-func (a *AAAAGen) Gen(r *MessageReader, l uint16) {
+func (a *AAAAGen) Gen(r *PacketReader, l uint16) {
 	a.IP = r.getBlob(16, nil)
 }
 
@@ -81,7 +81,7 @@ type NSGen struct {
 	NSName *Name
 }
 
-func (a *NSGen) Gen(r *MessageReader, l uint16) {
+func (a *NSGen) Gen(r *PacketReader, l uint16) {
 	a.NSName = r.getName(nil)
 }
 
@@ -99,7 +99,7 @@ type CNAMEGen struct {
 	CName *Name
 }
 
-func (a *CNAMEGen) Gen(r *MessageReader, l uint16) {
+func (a *CNAMEGen) Gen(r *PacketReader, l uint16) {
 	a.CName = r.getName(nil)
 }
 
@@ -118,7 +118,7 @@ type SOAGen struct {
 	Serial, Refresh, Retry, Expire, Minimum uint32
 }
 
-func (s *SOAGen) Gen(r *MessageReader, l uint16) {
+func (s *SOAGen) Gen(r *PacketReader, l uint16) {
 	s.MName = r.getName(nil)
 	s.RName = r.getName(nil)
 	s.Serial = r.getUint32(nil)
@@ -150,7 +150,7 @@ type MXGen struct {
 	Name *Name
 }
 
-func (m *MXGen) Gen(r *MessageReader, l uint16) {
+func (m *MXGen) Gen(r *PacketReader, l uint16) {
 	m.Prio = r.getUint16(nil)
 	m.Name = r.getName(nil)
 }

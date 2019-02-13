@@ -55,8 +55,8 @@ var (
 	roots NameIPSet = NewNameIPSet()
 
 	badServers  = tdns.NewBadServerCache()
-	resultCache = tdns.NewResultCache()
-	negResultCache = tdns.NewResultCache()
+	//resultCache = tdns.NewResultCache()
+	//negResultCache = tdns.NewResultCache()
 	rrCache     = tdns.NewRRCache()
 )
 
@@ -124,7 +124,7 @@ func (ips *NameIPSet) RandomizeIPs() (ret []tdns.NameIP) {
 	return
 }
 
-func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader *tdns.MessageReader, err error) {
+func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader tdns.MessageReaderInterface, err error) {
 	address := net.UDPAddr{IP: nsip, Port: 53}
 	conn, err := net.DialUDP("udp", nil, &address)
 	if err != nil {
@@ -149,7 +149,7 @@ func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	return
 }
 
-func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader *tdns.MessageReader, err error) {
+func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader tdns.MessageReaderInterface, err error) {
 	address := net.TCPAddr{IP: nsip, Port: 53}
 	dialer := net.Dialer{Timeout: 1 * time.Second}
 	conn, err := dialer.Dial("tcp", address.String())
@@ -191,7 +191,16 @@ func (res *DNSResolver) log(format string, args ...interface{}) {
 	fmt.Printf("%s%s\n", res.logprefix, str)
 }
 
-func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.Type, depth int) (reader *tdns.MessageReader, err error) {
+func (res *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstype tdns.Type) (reader tdns.MessageReaderInterface, err error) {
+
+	res.log("Asking cache: %s %s", name, dnstype)
+	reader = rrCache.GetRRSet(name, dnstype)
+	if reader != nil {
+		res.log("Result from cache!")
+		return reader, nil
+	}
+
+	res.log("Sending to server %s at %s", ns.Name, ns.IP)
 
 	doTCP := false
 	doEDNS := true
@@ -199,24 +208,24 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 	for tries := 0; tries < 4; tries++ {
 		// We could identify a server using the fields mentioned in RFC 2308 7.2 plus TCP and EDNS
 		// But lets diffrentiate between UDP/TCP and EDNS only
-		server := tdns.BadServer{Address: nsip, TCP: doTCP, EDNS: doEDNS, Name: nil, Type: 0}
+		server := tdns.BadServer{Address: ns.IP, TCP: doTCP, EDNS: doEDNS, Name: nil, Type: 0}
 		if badServers.IsBad(&server) {
-			res.log("%s tcp=%v edns=%v is BAD, lets see if there's another", nsip, doTCP, doEDNS)
+			res.log("%s tcp=%v edns=%v is BAD, lets see if there's another", ns.IP, doTCP, doEDNS)
 			if !doTCP {
 				if doEDNS {
 					doEDNS = false
-					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
+					res.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
 					continue
 				} else {
 					doTCP = true
 					doEDNS = true
-					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
+					res.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
 					continue
 				}
 			} else {
 				if doEDNS {
 					doEDNS = false
-					res.log("%s continuing with tcp=%v edns=%v", nsip, doTCP, doEDNS)
+					res.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
 					continue
 				} else {
 					return nil, fmt.Errorf("no non-BAD servers left")
@@ -236,13 +245,13 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 
 		res.numQueries++
 		if doTCP {
-			if reader, err = res.sendTCPQuery(nsip, writer); err != nil {
+			if reader, err = res.sendTCPQuery(ns.IP, writer); err != nil {
 				res.log("%d %s increasing badnesss", tries, server.String())
 				badServers.Bad(&server)
 				return
 			}
 		} else {
-			if reader, err = res.sendUDPQuery(nsip, writer); err != nil {
+			if reader, err = res.sendUDPQuery(ns.IP, writer); err != nil {
 				res.log("%d %s increasing badnesss", tries, server.String())
 				doTCP = true
 				badServers.Bad(&server)
@@ -250,21 +259,21 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 			}
 		}
 		// for security reasons, you really need this
-		if reader.DH.Id != writer.DH.Id {
+		if reader.DH().Id != writer.DH.Id {
 			res.log("ID mismatch on answer")
 			continue
 		}
-		if reader.DH.Bit(tdns.QrMask) == 0 {
+		if reader.DH().Bit(tdns.QrMask) == 0 {
 			res.log("What we received was not a response, ignoring")
 			continue
 		}
-		if reader.DH.Rcode() == tdns.Formerr {
+		if reader.DH().Rcode() == tdns.Formerr {
 			// XXX this should check that there is no OPT in the response
 			res.log("Got a Formerr, resending without EDNS")
 			doEDNS = false
 			continue
 		}
-		if reader.DH.Bit(tdns.TcMask) == 1 {
+		if reader.DH().Bit(tdns.TcMask) == 1 {
 			res.log("Got a truncated answer, retrying over TCP")
 			doTCP = true
 			continue
@@ -272,7 +281,7 @@ func (res *DNSResolver) getResponse(nsip net.IP, name *tdns.Name, dnstype tdns.T
 		// It was an answer to our satisfaction
 		return
 	}
-	return nil, fmt.Errorf("Giving up on %s", nsip.String())
+	return nil, fmt.Errorf("giving up on %s", ns.IP.String())
 }
 
 func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret tdns.ResolveResult, err error) {
@@ -280,23 +289,23 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 	resolver.logprefix = fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
 	defer func() { resolver.logprefix = oldprefix }()
 
-	negcached, err := negResultCache.Get(name, dnstype)
-	if negcached != nil {
-		resolver.log("Found in negResultCache")
-		return *negcached, err
-	}
+	//negcached, err := negResultCache.Get(name, dnstype)
+	//if negcached != nil {
+	//	resolver.log("Found in negResultCache")
+	//	return *negcached, err
+	//}
 
-	cached, _ := resultCache.Get(name, dnstype)
-	if cached != nil {
-		resolver.log("Found in resultCache")
-		return *cached, nil
-	}
+	//cached, _ := resultCache.Get(name, dnstype)
+	//if cached != nil {
+	//	resolver.log("Found in resultCache")
+	//	return *cached, nil
+	//}
 	result, err := resolver.resolveAt1(name, dnstype, depth, auth, mservers)
-	if err == nil {
-		resultCache.Put(name, dnstype, &result, nil)
-	} else {
-		negResultCache.Put(name, dnstype, &result, err)
-	}
+	//if err == nil {
+	//	resultCache.Put(name, dnstype, &result, nil)
+	//} else {
+	//	negResultCache.Put(name, dnstype, &result, err)
+	//}
 	return result, err
 }
 
@@ -315,26 +324,23 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 
 	for serverindex, server := range servers {
 		var newAuth tdns.Name
+		var reader tdns.MessageReaderInterface
 
-		resolver.log("Sending to server %s at %s", server.Name, server.IP)
-
-		var reader *tdns.MessageReader
-
-		reader, err = resolver.getResponse(server.IP, name, dnstype, depth)
+		reader, err = resolver.getResponse(server, name, dnstype)
 		if err != nil {
 			resolver.log("%s", err)
 			continue
 		}
 
-		if !reader.Name.Equals(name) || reader.Type != dnstype {
+		if !reader.Name().Equals(name) || reader.Type() != dnstype {
 			resolver.log("Got a response %s to a different question %s or different %s %s type than we asked for!",
-				reader.Name.String(), name.String(), reader.Type, dnstype)
+				reader.Name().String(), name.String(), reader.Type(), dnstype)
 			continue // see if another server wants to work with us
 		}
 
 		// In a real resolver, you must ignore NXDOMAIN in case of a CNAME.
 		// Because that is how the intern et rolls.
-		if reader.DH.Rcode() == tdns.Nxdomain {
+		if reader.DH().Rcode() == tdns.Nxdomain {
 			resolver.log("Got an Nxdomain, it does not exist")
 			for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
 				resolver.log("Auths RR: %s", rrec)
@@ -344,57 +350,62 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			}
 			err = NxdomainError{}
 			return
-		} else if reader.DH.Rcode() != tdns.Noerror {
-			resolver.log("Answer from authoritative server had an error %s", reader.DH.Rcode())
-			if reader.DH.Rcode() == tdns.Servfail && serverindex < len(servers)-1 {
+		} else if reader.DH().Rcode() != tdns.Noerror {
+			resolver.log("Answer from authoritative server had an error %s", reader.DH().Rcode())
+			if reader.DH().Rcode() == tdns.Servfail && serverindex < len(servers)-1 {
 				continue
 			}
-			err = fmt.Errorf("Answer from authoritative server had an error: %s", reader.DH.Rcode())
+			err = fmt.Errorf("Answer from authoritative server had an error: %s", reader.DH().Rcode())
 			return
 		}
 
-		if reader.DH.Bit(tdns.AaMask) == 1 {
+		if reader.FromCache() {
+			resolver.log("Answer says it is from the cache")
+		}
+
+		if reader.DH().Bit(tdns.AaMask) == 1 {
 			resolver.log("Answer says it is authorative")
 		}
 
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
+		// XXX Cache poisoning!
+		rrCache.Put(reader)
+
 		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+
 			resolver.log("RR(%s): %s", rrec.Section, rrec)
 
 			// Pick up nameservers. We check if glue records are within the authority
 			// of what we approached this server for.
-			if rrec.Section == tdns.Authority && rrec.Type == tdns.NS {
+			if (reader.FromCache() || rrec.Section == tdns.Authority) && rrec.Type == tdns.NS {
 				if name.IsPartOf(&rrec.Name) {
 					nsname := rrec.Data.(*tdns.NSGen).NSName
 					nsses[nsname.K()] = nsname
 					newAuth = rrec.Name
-					rrCache.Put(rrec)
 				} else {
 					resolver.log("Authoritative server gave us NS record to which this query does not belong")
 				}
-			} else if rrec.Section == tdns.Additional && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
+			} else if (reader.FromCache() || rrec.Section == tdns.Additional) && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
 				if rrec.Name.IsPartOf(auth) {
 					switch a := rrec.Data.(type) {
 					case *tdns.AGen:
 						addresses.Add(&rrec.Name, a.IP)
-						rrCache.Put(rrec)
 					case *tdns.AAAAGen:
 						addresses.Add(&rrec.Name, a.IP)
-						rrCache.Put(rrec)
 					}
 				} else {
 					resolver.log("Not accepting IP address of %s: out of authority of this server", rrec.Name.String())
 				}
 			}
-			if rrec.Section == tdns.Authority && rrec.Type == tdns.SOA {
+			if (reader.FromCache() || rrec.Section == tdns.Authority) && rrec.Type == tdns.SOA {
 				ret.Auths = append(ret.Auths, rrec)
 			}
 
-			if reader.DH.Bit(tdns.AaMask) == 1 {
+			if reader.FromCache() || reader.DH().Bit(tdns.AaMask) == 1 {
 				// Authoritative answer. We trust this.
-				if rrec.Section == tdns.Answer && name.Equals(&rrec.Name) && dnstype == rrec.Type {
+				if (reader.FromCache() || rrec.Section == tdns.Answer) && name.Equals(&rrec.Name) && dnstype == rrec.Type {
 					resolver.log("We got an answer to our question!")
 					ret.Answers = append(ret.Answers, rrec)
 				} else if name.Equals(&rrec.Name) && rrec.Type == tdns.CNAME {
@@ -405,9 +416,10 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					if target.IsPartOf(auth) {
 						resolver.log("Target %s is within %s, harvesting from packet", target, auth)
 						hadMatch := false
-						for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
-							if rrec.Section == tdns.Answer && rrec.Name.Equals(target) && rrec.Type == dnstype {
+						for hrrec := reader.GetRR(); hrrec != nil; hrrec = reader.GetRR() {
+							if hrrec.Section == tdns.Answer && hrrec.Name.Equals(target) && hrrec.Type == dnstype {
 								hadMatch = true
+								rrec = hrrec
 								ret.Answers = append(ret.Answers, rrec)
 							}
 						}
@@ -438,13 +450,13 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		if len(ret.Answers) > 0 {
 			resolver.log("Done, returning %d results, %d intermediate", len(ret.Answers), len(ret.Intermediates))
 			return
-		} else if reader.DH.Bit(tdns.AaMask) == 1 && numa == 0 && numns == 0 {
+		} else if reader.DH().Bit(tdns.AaMask) == 1 && numa == 0 && numns == 0 {
 			resolver.log("No data response")
 			err = NodataError{}
 			return
 		}
 
-		resolver.log("We got delegated to %d %s nameserver names", len(nsses), newAuth.String())
+		resolver.log("We got delegated to %d %s nameserver names", numns, newAuth.String())
 		if numa > 0 {
 			resolver.log("We have %d addresses to iterate to", numa)
 			res2, err2 := resolver.resolveAt(name, dnstype, depth+1, &newAuth, &addresses)
@@ -482,10 +494,8 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					switch a := res.Data.(type) {
 					case *tdns.AGen:
 						newns.Add(&n, a.IP)
-						rrCache.Put(res)
 					case *tdns.AAAAGen:
 						newns.Add(&n, a.IP)
-						rrCache.Put(res)
 					}
 				}
 				if newns.Size() == 0 {
@@ -519,9 +529,9 @@ func resolveHints() {
 	// We do not explicitly randomize this map, since golang already
 	// does this.
 	empty := DNSResolver{DNSBufSize: 4000}
-	for _, ip := range hints {
+	for name, ip := range hints {
 		fmt.Println("Using hint", ip)
-		reader, err := empty.getResponse(ip, tdns.MakeName("."), tdns.NS, 0)
+		reader, err := empty.getResponse(tdns.NameIP{Name: name, IP: ip}, tdns.MakeName("."), tdns.NS)
 		if err != nil {
 			continue
 		}
@@ -541,20 +551,20 @@ func resolveHints() {
 	}
 }
 
-func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.MessageReader) {
+func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketReader) {
 
 	resolver := DNSResolver{DNSBufSize: 4000}
 
-	writer := tdns.NewMessageWriter(&reader.Name, reader.Type, tdns.IN, math.MaxUint16)
-	writer.DH.SetBitValue(tdns.RdMask, reader.DH.Bit(tdns.RdMask))
+	writer := tdns.NewMessageWriter(reader.Name(), reader.Type(), tdns.IN, math.MaxUint16)
+	writer.DH.SetBitValue(tdns.RdMask, reader.DH().Bit(tdns.RdMask))
 	writer.DH.SetBit(tdns.RaMask)
 	writer.DH.SetBit(tdns.QrMask)
-	writer.DH.Id = reader.DH.Id
+	writer.DH.Id = reader.DH().Id
 
 
-	res, err := resolver.resolveAt(&reader.Name, reader.Type, 0, tdns.MakeName(""), &roots)
+	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots)
 
-	resolver.log("Result of query for %s|%s %d/%d", reader.Name.String(), reader.Type, len(res.Intermediates), len(res.Answers))
+	resolver.log("Result of query for %s|%s %d/%d", reader.Name().String(), reader.Type(), len(res.Intermediates), len(res.Answers))
 	for _, r := range res.Intermediates {
 		resolver.log("%s", r.String())
 	}
@@ -564,9 +574,10 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.MessageR
 
 	resolver.log("Numqueries: %d", resolver.numQueries)
 	resolver.log("BadServer: %s", badServers.Info())
-	resolver.log("ResultCache: %s", resultCache.Info())
-	resolver.log("NegResultCache: %s", negResultCache.Info())
-	resolver.log("RRCache: %s", rrCache.Info())
+	//resolver.log("ResultCache: %s", resultCache.Info())
+	//resolver.log("NegResultCache: %s", negResultCache.Info())
+	//resolver.log("RRCache: %s\n%s\n", rrCache.Info(), rrCache.String())
+	resolver.log("RRCache: %s\n", rrCache.Info())
 
 	// XXX numqueries
 
@@ -585,12 +596,12 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.MessageR
 		for _, r := range res.Auths {
 			writer.PutRR(tdns.Authority, &r.Name, r.Type, r.TTL, r.Class, r.Data)
 		}
-		resolver.log("Nodata for %s|%s", reader.Name.String(), reader.Type)
+		resolver.log("Nodata for %s|%s", reader.Name().String(), reader.Type())
 	case NxdomainError:
 		for _, r := range res.Auths {
 			writer.PutRR(tdns.Authority, &r.Name, r.Type, r.TTL, r.Class, r.Data)
 		}
-		resolver.log("Nxdomain for %s|%s", reader.Name.String(), reader.Type)
+		resolver.log("Nxdomain for %s|%s", reader.Name().String(), reader.Type())
 		writer.DH.SetRcode(tdns.Nxdomain)
 	}
 	conn.WriteTo(writer.Serialize(), address)
@@ -619,7 +630,7 @@ func doListen(listenAddress string) {
 		if err != nil {
 			continue
 		}
-		if reader.DH.Bit(tdns.QrMask) == 1 {
+		if reader.DH().Bit(tdns.QrMask) == 1 {
 			fmt.Printf("Received packet from %s was not a query\n", address)
 			continue
 		}
@@ -636,8 +647,8 @@ func main() {
 	}
 
 	go badServers.Run()
-	go negResultCache.RunNeg()
-	go resultCache.Run()
+	//go negResultCache.RunNeg()
+	//go resultCache.Run()
 	go rrCache.Run()
 
 	resolveHints()
