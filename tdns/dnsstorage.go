@@ -83,7 +83,6 @@ const (
 	CAA         = 257
 
 	IN Class = 1
-	CH       = 3
 
 	Question   Section = 0
 	Answer             = 1
@@ -154,7 +153,7 @@ func (h *Header) Opcode() uint16 {
 
 func (h *Header) SetRcode(val RCode) {
 	h.Flags &^= RcodeMask
-	h.Flags |= (RcodeMask & uint16(val))
+	h.Flags |= RcodeMask & uint16(val)
 }
 
 func (h *Header) Rcode() RCode {
@@ -195,24 +194,24 @@ func charcmp(a, b byte) int {
 	}
 }
 
-func (a *Label) Less(b *Label) bool {
-	for i := 0; i < len(a.Label) && i < len(b.Label); i++ {
-		if c := charcmp(a.Label[i], b.Label[i]); c < 0 {
+func (l *Label) Less(b *Label) bool {
+	for i := 0; i < len(l.Label) && i < len(b.Label); i++ {
+		if c := charcmp(l.Label[i], b.Label[i]); c < 0 {
 			return true
 		} else if c > 0 {
 			return false
 		}
 	}
-	return len(a.Label) < len(b.Label)
+	return len(l.Label) < len(b.Label)
 }
 
-func (a *Label) Equals(b *Label) bool {
-	return !a.Less(b) && !b.Less(a)
+func (l *Label) Equals(b *Label) bool {
+	return !l.Less(b) && !b.Less(l)
 }
 
-func (a *Label) String() string {
+func (l *Label) String() string {
 	var b strings.Builder
-	for _, a := range a.Label {
+	for _, a := range l.Label {
 		if a <= 0x20 || a >= 0x7f { // RFC 4343
 			_, _ = fmt.Fprintf(&b, "\\%03d", a)
 		} else {
@@ -253,12 +252,12 @@ func (n *Name) String() string {
 	return n.K()
 }
 
-func (a *Name) string() string {
-	if a.Empty() {
+func (n *Name) string() string {
+	if n.Empty() {
 		return "."
 	}
 	var b strings.Builder
-	for e := a.Name.Front(); e != nil; e = e.Next() {
+	for e := n.Name.Front(); e != nil; e = e.Next() {
 		b.WriteString(e.Value.(*Label).String())
 		b.WriteString(".")
 	}
@@ -273,8 +272,8 @@ func (n *Name) Empty() bool {
 	return n.Name.Len() == 0
 }
 
-func (a *Name) Less(b *Name) bool {
-	for i1, i2 := a.Name.Front(), b.Name.Front(); i1 != nil && i2 != nil; i1, i2 = i1.Next(), i2.Next() {
+func (n *Name) Less(b *Name) bool {
+	for i1, i2 := n.Name.Front(), b.Name.Front(); i1 != nil && i2 != nil; i1, i2 = i1.Next(), i2.Next() {
 		v1 := i1.Value.(*Label)
 		v2 := i2.Value.(*Label)
 		if v1.Less(v2) {
@@ -283,23 +282,23 @@ func (a *Name) Less(b *Name) bool {
 			return false
 		}
 	}
-	return a.Name.Len() < b.Name.Len()
+	return n.Name.Len() < b.Name.Len()
 }
 
-func (a *Name) Equals(b *Name) bool {
-	return !a.Less(b) && !b.Less(a)
+func (n *Name) Equals(b *Name) bool {
+	return !n.Less(b) && !b.Less(n)
 }
 
-func (a *Name) Append(b *Name) {
+func (n *Name) Append(b *Name) {
 	for e := b.Name.Front(); e != nil; e = e.Next() {
-		a.Name.PushBack(e.Value.(*Label))
+		n.Name.PushBack(e.Value.(*Label))
 	}
-	a.key = a.string()
+	n.key = n.string()
 }
 
-func (a *Name) PushBack(l *Label) {
-	a.Name.PushBack(l)
-	a.key = a.string()
+func (n *Name) PushBack(l *Label) {
+	n.Name.PushBack(l)
+	n.key = n.string()
 }
 
 func (n *Name) IsPartOf(root *Name) bool {

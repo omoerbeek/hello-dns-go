@@ -187,26 +187,26 @@ func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, c
 	XfrUInt16(w.payload, uint16(dnstype))
 	XfrUInt16(w.payload, uint16(class))
 	XfrUInt32(w.payload, ttl)
-	bytes := data.ToMessage(w)
-	XfrUInt16(w.payload, uint16(len(bytes)))
-	XfrBlob(w.payload, bytes)
+	rawbytes := data.ToMessage(w)
+	XfrUInt16(w.payload, uint16(len(rawbytes)))
+	XfrBlob(w.payload, rawbytes)
 
 	if w.payload.Len() > w.maxsize {
 		// It did not fit, reset and report
 		w.payload.Truncate(current)
-		return fmt.Errorf("Message did not fit")
+		return fmt.Errorf("message did not fit")
 	}
 	switch s {
 	case Question:
-		return fmt.Errorf("Can'timestamp add questions to a DNS Message with putRR")
+		return fmt.Errorf("can'timestamp add questions to a DNS Message with putRR")
 	case Answer:
 		if w.DH.NSCount > 0 || w.DH.ARCount > 0 {
-			return fmt.Errorf("Can'timestamp add answer RRs out of order to a DNS Messa ge")
+			return fmt.Errorf("can'timestamp add answer RRs out of order to a DNS Message")
 		}
 		w.DH.ANCount++
 	case Authority:
 		if w.DH.ARCount > 0 {
-			return fmt.Errorf("Can'timestamp add authority RRs out of order to a DNS Message")
+			return fmt.Errorf("can'timestamp add authority RRs out of order to a DNS Message")
 		}
 		w.DH.NSCount++
 	case Additional:
@@ -261,14 +261,14 @@ func (p *PacketReader) Class() Class {
 	return p.class
 }
 
-func (r *PacketReader) String() string {
-	header := r.dh.String()
-	if r.haveEDNS {
+func (p *PacketReader) String() string {
+	header := p.dh.String()
+	if p.haveEDNS {
 		b := 0
-		if r.doBit {
+		if p.doBit {
 			b = 1
 		}
-		header += fmt.Sprintf(" doBit=%d EDNSversion=%d bufsize=%d", b, r.ednsVersion, r.bufsize)
+		header += fmt.Sprintf(" doBit=%d EDNSversion=%d bufsize=%d", b, p.ednsVersion, p.bufsize)
 	}
 	return header
 }
@@ -282,84 +282,84 @@ func NewMessagReader(data []byte, length int) (*PacketReader, error) {
 	return r, err
 }
 
-func (r *PacketReader) Reset() {
-	if err := r.Read(r.data, r.length); err != nil {
+func (p *PacketReader) Reset() {
+	if err := p.Read(p.data, p.length); err != nil {
 		panic(err.Error())
 	}
 }
 
-func (r *PacketReader) Read(data []byte, length int) error {
-	r.data = data
-	r.length = length
+func (p *PacketReader) Read(data []byte, length int) error {
+	p.data = data
+	p.length = length
 	reader := bytes.NewReader(data)
-	err := binary.Read(reader, binary.BigEndian, &r.dh)
+	err := binary.Read(reader, binary.BigEndian, &p.dh)
 	if err != nil {
 		return err
 	}
-	r.payload = data[HeaderLen:length]
-	r.payloadpos = 0
-	r.rrpos = 0
+	p.payload = data[HeaderLen:length]
+	p.payloadpos = 0
+	p.rrpos = 0
 
-	if r.dh.QDCount > 0 {
-		r.name = r.getName(nil)
-		r.dnstype = Type(r.getUint16(nil))
-		r.class = Class(r.getUint16(nil))
+	if p.dh.QDCount > 0 {
+		p.name = p.getName(nil)
+		p.dnstype = Type(p.getUint16(nil))
+		p.class = Class(p.getUint16(nil))
 	}
 
-	if r.dh.ARCount > 0 {
-		nowpos := r.payloadpos
-		r.skipRRs(int(r.dh.ANCount + r.dh.NSCount + r.dh.ARCount - 1))
-		if r.getUint8(nil) == 0 && Type(r.getUint16(nil)) == OPT {
-			r.bufsize = r.getUint16(nil)
-			r.getUint8(nil)
-			r.ednsVersion = r.getUint8(nil)
-			r.doBit = false
-			flags := r.getUint8(nil)
+	if p.dh.ARCount > 0 {
+		nowpos := p.payloadpos
+		p.skipRRs(int(p.dh.ANCount + p.dh.NSCount + p.dh.ARCount - 1))
+		if p.getUint8(nil) == 0 && Type(p.getUint16(nil)) == OPT {
+			p.bufsize = p.getUint16(nil)
+			p.getUint8(nil)
+			p.ednsVersion = p.getUint8(nil)
+			p.doBit = false
+			flags := p.getUint8(nil)
 			if flags&0x80 != 0 {
-				r.doBit = true
+				p.doBit = true
 			}
-			r.getUint8(nil)
-			r.getUint16(nil)
-			r.haveEDNS = true
+			p.getUint8(nil)
+			p.getUint16(nil)
+			p.haveEDNS = true
 		}
-		r.payloadpos = nowpos
+		p.payloadpos = nowpos
 	}
 	return err
 }
 
-func (r *PacketReader) skipRRs(num int) {
+func (p *PacketReader) skipRRs(num int) {
 	for i := 0; i < num; i++ {
-		r.getName(nil)
-		r.payloadpos += 8 // type, class , ttl
-		l := r.getUint16(nil)
-		r.payloadpos += l
-		if r.payloadpos > uint16(len(r.payload)) {
+		p.getName(nil)
+		p.payloadpos += 8 // type, class , ttl
+		l := p.getUint16(nil)
+		p.payloadpos += l
+		if p.payloadpos > uint16(len(p.payload)) {
 			// XXX handle error!
 		}
 	}
 }
 
-func (r *PacketReader) GetRR() (rrec *RRec) {
-	if r.payloadpos == uint16(len(r.payload)) {
+func (p *PacketReader) GetRR() (rrec *RRec) {
+	if p.payloadpos == uint16(len(p.payload)) {
 		return nil
 	}
 	rrec = new(RRec)
-	if r.rrpos < r.dh.ANCount {
+	if p.rrpos < p.dh.ANCount {
 		rrec.Section = Answer
-	} else if r.rrpos < r.dh.ANCount+r.dh.NSCount {
+	} else if p.rrpos < p.dh.ANCount+p.dh.NSCount {
 		rrec.Section = Authority
 	} else {
 		rrec.Section = Additional
 	}
 
-	r.rrpos++
+	p.rrpos++
 
-	rrec.Name = *r.getName(nil)
-	rrec.Type = Type(r.getUint16(nil))
-	rrec.Class = Class(r.getUint16(nil))
-	rrec.TTL = r.getUint32(nil)
-	l := r.getUint16(nil)
-	//r.endofrecord = r.payloadpos + l
+	rrec.Name = *p.getName(nil)
+	rrec.Type = Type(p.getUint16(nil))
+	rrec.Class = Class(p.getUint16(nil))
+	rrec.TTL = p.getUint32(nil)
+	l := p.getUint16(nil)
+	//p.endofrecord = p.payloadpos + l
 
 	var result RRGen
 	switch rrec.Type {
@@ -378,62 +378,62 @@ func (r *PacketReader) GetRR() (rrec *RRec) {
 	default:
 		result = new(UnknownGen)
 	}
-	result.Gen(r, l)
+	result.Gen(p, l)
 	rrec.Data = result
 
 	return rrec
 }
 
-func (r *PacketReader) getUint8(pos *uint16) uint8 {
+func (p *PacketReader) getUint8(pos *uint16) uint8 {
 	if pos == nil {
-		pos = &r.payloadpos
+		pos = &p.payloadpos
 	}
-	ret := r.payload[*pos]
+	ret := p.payload[*pos]
 	*pos += 1
 	return ret
 }
 
-func (r *PacketReader) getUint16(pos *uint16) uint16 {
+func (p *PacketReader) getUint16(pos *uint16) uint16 {
 	if pos == nil {
-		pos = &r.payloadpos
+		pos = &p.payloadpos
 	}
-	ret := binary.BigEndian.Uint16(r.payload[*pos : *pos+2])
+	ret := binary.BigEndian.Uint16(p.payload[*pos : *pos+2])
 	*pos += 2
 	return ret
 }
 
-func (r *PacketReader) getUint32(pos *uint16) uint32 {
+func (p *PacketReader) getUint32(pos *uint16) uint32 {
 	if pos == nil {
-		pos = &r.payloadpos
+		pos = &p.payloadpos
 	}
-	ret := binary.BigEndian.Uint32(r.payload[*pos : *pos+4])
+	ret := binary.BigEndian.Uint32(p.payload[*pos : *pos+4])
 	*pos += 4
 	return ret
 }
 
-func (r *PacketReader) getBlob(size uint16, pos *uint16) []byte {
+func (p *PacketReader) getBlob(size uint16, pos *uint16) []byte {
 	if pos == nil {
-		pos = &r.payloadpos
+		pos = &p.payloadpos
 	}
 	data := make([]byte, size)
-	copy(data, r.payload[*pos:*pos+size])
+	copy(data, p.payload[*pos:*pos+size])
 	*pos += size
 	return data
 }
 
-func (r *PacketReader) getName(pos *uint16) *Name {
+func (p *PacketReader) getName(pos *uint16) *Name {
 	ret := new(Name)
 	if pos == nil {
-		pos = &r.payloadpos
+		pos = &p.payloadpos
 	}
 	for {
-		labellen := uint16(r.getUint8(pos))
+		labellen := uint16(p.getUint8(pos))
 		if labellen&0xc0 != 0 {
-			labellen2 := uint16(r.getUint8(pos))
+			labellen2 := uint16(p.getUint8(pos))
 			newpos := ((labellen &^ 0xc0) << 8) | labellen2
 			newpos -= HeaderLen
 			if newpos < *pos {
-				ret.Append(r.getName(&newpos))
+				ret.Append(p.getName(&newpos))
 				return ret
 			} else {
 				panic("forward compression")
@@ -442,7 +442,7 @@ func (r *PacketReader) getName(pos *uint16) *Name {
 		if labellen == 0 {
 			break
 		}
-		label := NewLabel(string(r.getBlob(labellen, pos))) // XXX string vs []byte
+		label := NewLabel(string(p.getBlob(labellen, pos))) // XXX string vs []byte
 		ret.PushBack(label)
 	}
 	return ret

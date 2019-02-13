@@ -45,7 +45,7 @@ func TestBadServer(t *testing.T) {
 	}
 }
 
-var bs BadServerCache
+var bs *BadServerCache
 
 func TestMain(m *testing.M) {
 	bs = NewBadServerCache()

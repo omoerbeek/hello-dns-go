@@ -57,13 +57,13 @@ func NewResultCache() *ResultCache {
 	return &ResultCache{results: make(map[string]resulttype), NegCacheDuration: DefaultNegCacheSeconds * time.Second}
 }
 
-func (r *ResultCache) Size() int {
-	return len(r.results)
+func (rc *ResultCache) Size() int {
+	return len(rc.results)
 }
 
-func (r *ResultCache) String() string {
+func (rc *ResultCache) String() string {
 	var buf bytes.Buffer
-	for n, v := range r.results {
+	for n, v := range rc.results {
 		buf.WriteString(v.err.Error())
 		buf.WriteString(v.timestamp.String())
 		buf.WriteString("TTD: " + v.ttd.String())
@@ -89,11 +89,11 @@ func getNonExpired(old []*RRec, now, timestamp time.Time) (ret []*RRec, exp bool
 	return ret, exp
 }
 
-func (c *ResultCache) Get(name *Name, dnstype Type) (*ResolveResult, error) {
+func (rc *ResultCache) Get(name *Name, dnstype Type) (*ResolveResult, error) {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
-	c.mutex.Lock()
-	results, ok := c.results[k]
-	c.mutex.Unlock()
+	rc.mutex.Lock()
+	results, ok := rc.results[k]
+	rc.mutex.Unlock()
 
 	if !ok {
 		return nil, nil
@@ -116,93 +116,94 @@ func (c *ResultCache) Get(name *Name, dnstype Type) (*ResolveResult, error) {
 	return &ret, results.err
 }
 
-func (c *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult, err error) {
+func (rc *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult, err error) {
 	t := time.Now()
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 
-	c.mutex.Lock()
-	c.results[k] = resulttype{resolveResult: r, err: err, timestamp: t, ttd: t.Add(c.NegCacheDuration)}
-	c.mutex.Unlock()
+	rc.mutex.Lock()
+	rc.results[k] = resulttype{resolveResult: r, err: err, timestamp: t, ttd: t.Add(rc.NegCacheDuration)}
+	rc.mutex.Unlock()
 }
 
-func (c *ResultCache) Info() string {
-	c.mutex.Lock()
-	lb := len(c.results)
-	c.mutex.Unlock()
+func (rc *ResultCache) Info() string {
+	rc.mutex.Lock()
+	lb := len(rc.results)
+	rc.mutex.Unlock()
 	return fmt.Sprintf("Number entries in ResultCache: %d", lb)
 }
 
-func (c *ResultCache) cleanup() {
+func (rc *ResultCache) cleanup() {
 	now := time.Now()
-	c.mutex.Lock()
+	rc.mutex.Lock()
 
-	for k, results := range c.results {
+	for k, results := range rc.results {
 		var exp1, exp2, exp3 bool
 		results.resolveResult.Auths, exp1 = getNonExpired(results.resolveResult.Auths, now, results.timestamp)
 		results.resolveResult.Intermediates, exp2 = getNonExpired(results.resolveResult.Intermediates, now, results.timestamp)
 		results.resolveResult.Answers, exp3 = getNonExpired(results.resolveResult.Answers, now, results.timestamp)
 		if exp1 || exp2 || exp3 {
-			delete(c.results, k)
+			delete(rc.results, k)
 		}
 	}
-	c.mutex.Unlock()
+	rc.mutex.Unlock()
 }
 
 // XXX revisit flushing policy...
-func (c *ResultCache) cleanupNeg() {
+func (rc *ResultCache) cleanupNeg() {
 	now := time.Now()
-	c.mutex.Lock()
-	for k, results := range c.results {
+	rc.mutex.Lock()
+	outer:
+	for k, results := range rc.results {
 		if now.After(results.ttd) {
-			delete(c.results, k)
+			delete(rc.results, k)
 			continue
 		}
 		for _, v := range results.resolveResult.Auths {
 			newttl := computeTTL(now, results.timestamp, v.TTL)
 			if newttl < 1 {
-				delete(c.results, k)
-				continue
+				delete(rc.results, k)
+				continue outer
 			}
 		}
 		for _, v := range results.resolveResult.Intermediates {
 			newttl := computeTTL(now, results.timestamp, v.TTL)
 			if newttl < 1 {
-				delete(c.results, k)
-				continue
+				delete(rc.results, k)
+				continue outer
 			}
 		}
 		for _, v := range results.resolveResult.Answers {
 			newttl := computeTTL(now, results.timestamp, v.TTL)
 			if newttl < 1 {
-				delete(c.results, k)
-				continue
+				delete(rc.results, k)
+				continue outer
 			}
 		}
 	}
-	c.mutex.Unlock()
+	rc.mutex.Unlock()
 }
 
-func (c *ResultCache) Run() {
+func (rc *ResultCache) Run() {
 	period := 10 * time.Second
 	tick := time.Tick(period)
 	for {
 		select {
 		case <-tick:
-			c.cleanup()
+			rc.cleanup()
 		}
 	}
 }
 
-func (c *ResultCache) RunNeg() {
+func (rc *ResultCache) RunNeg() {
 	period := 10 * time.Second
-	if period > c.NegCacheDuration {
-		period = c.NegCacheDuration / 2
+	if period > rc.NegCacheDuration {
+		period = rc.NegCacheDuration / 2
 	}
 	tick := time.Tick(period)
 	for {
 		select {
 		case <-tick:
-			c.cleanupNeg()
+			rc.cleanupNeg()
 		}
 	}
 }
@@ -303,7 +304,7 @@ func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, bool) {
 	return ret, true
 }
 
-func (c *RRCache) Get(name *Name, dnstype Type) ([]RRec, bool) {
+func (c *RRCache) get(name *Name, dnstype Type) ([]RRec, bool) {
 	for e := name.Name.Front(); e != nil; e = e.Next() {
 		tname := NewNameFromTail(e)
 		set, ok := c.getByName(tname, dnstype)
@@ -317,20 +318,20 @@ func (c *RRCache) Get(name *Name, dnstype Type) ([]RRec, bool) {
 }
 
 func (c *RRCache) GetNS(name *Name) []NameIP {
-	set, ok := c.Get(name, NS)
+	set, ok := c.get(name, NS)
 	if !ok {
 		return nil
 	}
 	var ret []NameIP
 	for _, s := range set {
 		ns := s.Data.(*NSGen).NSName
-		as, ok := c.Get(ns, A)
+		as, ok := c.get(ns, A)
 		if ok {
 			for _, a := range as {
 				ret = append(ret, NameIP{s.Name.String(), a.Data.(*AGen).IP})
 			}
 		}
-		aaaas, ok := c.Get(ns, AAAA)
+		aaaas, ok := c.get(ns, AAAA)
 		if ok {
 			for _, a := range aaaas {
 				ret = append(ret, NameIP{s.Name.String(), a.Data.(*AAAAGen).IP})
@@ -388,7 +389,7 @@ func (c *RRCache) GetRRSet(name *Name, dnstype Type) MessageReaderInterface {
 		m.rr = rrset
 		return &m
 	}
-	if rrset, ok := c.Get(name, dnstype); ok {
+	if rrset, ok := c.get(name, dnstype); ok {
 		m.rr = rrset
 		return &m
 	}
@@ -423,7 +424,7 @@ func (c *RRCache) cleanup() {
 }
 
 func (c *RRCache) Run() {
-	period := 10 * time.Second
+	period := 60 * time.Second
 	tick := time.Tick(period)
 	for {
 		select {

@@ -38,12 +38,13 @@ type (
 
 	DNSResolver struct {
 		DNSBufSize int
+		DoIPv6     bool
 		logprefix  string
 		numQueries int
 	}
 
 	NxdomainError struct{}
-	NodataError   struct{}
+	NodataError struct{}
 )
 
 var (
@@ -52,12 +53,11 @@ var (
 		"f.root-servers.net": net.ParseIP("192.5.5.241"),
 		"k.root-servers.net": net.ParseIP("193.0.14.129"),
 	}
-	roots NameIPSet = NewNameIPSet()
+	roots = NewNameIPSet()
 
-	badServers  = tdns.NewBadServerCache()
-	//resultCache = tdns.NewResultCache()
-	//negResultCache = tdns.NewResultCache()
-	rrCache     = tdns.NewRRCache()
+	badServers     = tdns.NewBadServerCache()
+	negResultCache = tdns.NewResultCache()
+	rrCache        = tdns.NewRRCache()
 )
 
 func (NxdomainError) Error() string {
@@ -115,7 +115,7 @@ func (ips *NameIPSet) Size() (sum int) {
 func (ips *NameIPSet) RandomizeIPs() (ret []tdns.NameIP) {
 	for name, i := range ips.Map {
 		for _, anip := range i {
-			ret = append(ret, tdns.NameIP{name, anip})
+			ret = append(ret, tdns.NameIP{Name: name, IP: anip})
 		}
 	}
 	mrand.Shuffle(len(ret), func(i, j int) {
@@ -124,7 +124,7 @@ func (ips *NameIPSet) RandomizeIPs() (ret []tdns.NameIP) {
 	return
 }
 
-func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader tdns.MessageReaderInterface, err error) {
+func (resolver *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader tdns.MessageReaderInterface, err error) {
 	address := net.UDPAddr{IP: nsip, Port: 53}
 	conn, err := net.DialUDP("udp", nil, &address)
 	if err != nil {
@@ -138,7 +138,7 @@ func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 		return
 	}
 
-	data := make([]byte, res.DNSBufSize)
+	data := make([]byte, resolver.DNSBufSize)
 	var n int
 	// RFC 2308 talks about 120 seconds, I suppose that is not workable...
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -149,7 +149,7 @@ func (res *DNSResolver) sendUDPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	return
 }
 
-func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader tdns.MessageReaderInterface, err error) {
+func (resolver *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (reader tdns.MessageReaderInterface, err error) {
 	address := net.TCPAddr{IP: nsip, Port: 53}
 	dialer := net.Dialer{Timeout: 1 * time.Second}
 	conn, err := dialer.Dial("tcp", address.String())
@@ -186,21 +186,21 @@ func (res *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWriter) (r
 	return
 }
 
-func (res *DNSResolver) log(format string, args ...interface{}) {
+func (resolver *DNSResolver) log(format string, args ...interface{}) {
 	str := fmt.Sprintf(format, args...)
-	fmt.Printf("%s%s\n", res.logprefix, str)
+	fmt.Printf("%s%s\n", resolver.logprefix, str)
 }
 
-func (res *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstype tdns.Type) (reader tdns.MessageReaderInterface, err error) {
+func (resolver *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstype tdns.Type) (reader tdns.MessageReaderInterface, err error) {
 
-	res.log("Asking cache: %s %s", name, dnstype)
+	resolver.log("Asking cache: %s %s", name, dnstype)
 	reader = rrCache.GetRRSet(name, dnstype)
 	if reader != nil {
-		res.log("Result from cache!")
+		resolver.log("Result from cache!")
 		return reader, nil
 	}
 
-	res.log("Sending to server %s at %s", ns.Name, ns.IP)
+	resolver.log("Sending to server %s at %s", ns.Name, ns.IP)
 
 	doTCP := false
 	doEDNS := true
@@ -210,22 +210,22 @@ func (res *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstype tdn
 		// But lets diffrentiate between UDP/TCP and EDNS only
 		server := tdns.BadServer{Address: ns.IP, TCP: doTCP, EDNS: doEDNS, Name: nil, Type: 0}
 		if badServers.IsBad(&server) {
-			res.log("%s tcp=%v edns=%v is BAD, lets see if there's another", ns.IP, doTCP, doEDNS)
+			resolver.log("%s tcp=%v edns=%v is BAD, lets see if there's another", ns.IP, doTCP, doEDNS)
 			if !doTCP {
 				if doEDNS {
 					doEDNS = false
-					res.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
+					resolver.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
 					continue
 				} else {
 					doTCP = true
 					doEDNS = true
-					res.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
+					resolver.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
 					continue
 				}
 			} else {
 				if doEDNS {
 					doEDNS = false
-					res.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
+					resolver.log("%s continuing with tcp=%v edns=%v", ns.IP, doTCP, doEDNS)
 					continue
 				} else {
 					return nil, fmt.Errorf("no non-BAD servers left")
@@ -236,23 +236,23 @@ func (res *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstype tdn
 		writer := tdns.NewMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
 
 		if doEDNS {
-			writer.SetEDNS(res.DNSBufSize, false, tdns.Noerror)
+			writer.SetEDNS(resolver.DNSBufSize, false, tdns.Noerror)
 		}
 
 		// Use a good random source out of principle
 		r, _ := rand.Int(rand.Reader, big.NewInt(math.MaxUint16+1))
 		writer.DH.Id = uint16(r.Int64())
 
-		res.numQueries++
+		resolver.numQueries++
 		if doTCP {
-			if reader, err = res.sendTCPQuery(ns.IP, writer); err != nil {
-				res.log("%d %s increasing badnesss", tries, server.String())
+			if reader, err = resolver.sendTCPQuery(ns.IP, writer); err != nil {
+				resolver.log("%d %s increasing badnesss", tries, server.String())
 				badServers.Bad(&server)
 				return
 			}
 		} else {
-			if reader, err = res.sendUDPQuery(ns.IP, writer); err != nil {
-				res.log("%d %s increasing badnesss", tries, server.String())
+			if reader, err = resolver.sendUDPQuery(ns.IP, writer); err != nil {
+				resolver.log("%d %s increasing badnesss", tries, server.String())
 				doTCP = true
 				badServers.Bad(&server)
 				continue
@@ -260,21 +260,21 @@ func (res *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstype tdn
 		}
 		// for security reasons, you really need this
 		if reader.DH().Id != writer.DH.Id {
-			res.log("ID mismatch on answer")
+			resolver.log("ID mismatch on answer")
 			continue
 		}
 		if reader.DH().Bit(tdns.QrMask) == 0 {
-			res.log("What we received was not a response, ignoring")
+			resolver.log("What we received was not a response, ignoring")
 			continue
 		}
 		if reader.DH().Rcode() == tdns.Formerr {
 			// XXX this should check that there is no OPT in the response
-			res.log("Got a Formerr, resending without EDNS")
+			resolver.log("Got a Formerr, resending without EDNS")
 			doEDNS = false
 			continue
 		}
 		if reader.DH().Bit(tdns.TcMask) == 1 {
-			res.log("Got a truncated answer, retrying over TCP")
+			resolver.log("Got a truncated answer, retrying over TCP")
 			doTCP = true
 			continue
 		}
@@ -289,23 +289,18 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 	resolver.logprefix = fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
 	defer func() { resolver.logprefix = oldprefix }()
 
-	//negcached, err := negResultCache.Get(name, dnstype)
-	//if negcached != nil {
-	//	resolver.log("Found in negResultCache")
-	//	return *negcached, err
-	//}
+	negcached, err := negResultCache.Get(name, dnstype)
+	if negcached != nil {
+		resolver.log("Found in negResultCache")
+		return *negcached, err
+	}
 
-	//cached, _ := resultCache.Get(name, dnstype)
-	//if cached != nil {
-	//	resolver.log("Found in resultCache")
-	//	return *cached, nil
-	//}
 	result, err := resolver.resolveAt1(name, dnstype, depth, auth, mservers)
-	//if err == nil {
-	//	resultCache.Put(name, dnstype, &result, nil)
-	//} else {
-	//	negResultCache.Put(name, dnstype, &result, err)
-	//}
+	if err == nil {
+		//resultCache.Put(name, dnstype, &result, nil)
+	} else {
+		negResultCache.Put(name, dnstype, &result, err)
+	}
 	return result, err
 }
 
@@ -323,6 +318,11 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 	}
 
 	for serverindex, server := range servers {
+
+		if !resolver.DoIPv6 && server.IP.To4() == nil {
+			continue
+		}
+
 		var newAuth tdns.Name
 		var reader tdns.MessageReaderInterface
 
@@ -355,7 +355,7 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			if reader.DH().Rcode() == tdns.Servfail && serverindex < len(servers)-1 {
 				continue
 			}
-			err = fmt.Errorf("Answer from authoritative server had an error: %s", reader.DH().Rcode())
+			err = fmt.Errorf("answer from authoritative server had an error: %s", reader.DH().Rcode())
 			return
 		}
 
@@ -553,14 +553,13 @@ func resolveHints() {
 
 func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketReader) {
 
-	resolver := DNSResolver{DNSBufSize: 4000}
+	resolver := DNSResolver{DNSBufSize: 4000, DoIPv6: false}
 
 	writer := tdns.NewMessageWriter(reader.Name(), reader.Type(), tdns.IN, math.MaxUint16)
 	writer.DH.SetBitValue(tdns.RdMask, reader.DH().Bit(tdns.RdMask))
 	writer.DH.SetBit(tdns.RaMask)
 	writer.DH.SetBit(tdns.QrMask)
 	writer.DH.Id = reader.DH().Id
-
 
 	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots)
 
@@ -574,8 +573,7 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 
 	resolver.log("Numqueries: %d", resolver.numQueries)
 	resolver.log("BadServer: %s", badServers.Info())
-	//resolver.log("ResultCache: %s", resultCache.Info())
-	//resolver.log("NegResultCache: %s", negResultCache.Info())
+	resolver.log("NegResultCache: %s", negResultCache.Info())
 	//resolver.log("RRCache: %s\n%s\n", rrCache.Info(), rrCache.String())
 	resolver.log("RRCache: %s\n", rrCache.Info())
 
@@ -583,9 +581,9 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 
 	switch err.(type) {
 	case nil:
-		for _, _ = range res.Auths {
-			//writer.PutRR(tdns.Auths, &r.Name, r.Type, r.TTL, r.Class, r.Data)
-		}
+		//for _, _ = range res.Auths {
+		//writer.PutRR(tdns.Auths, &r.Name, r.Type, r.TTL, r.Class, r.Data)
+		//}
 		for _, r := range res.Intermediates {
 			writer.PutRR(tdns.Answer, &r.Name, r.Type, r.TTL, r.Class, r.Data)
 		}
@@ -647,8 +645,7 @@ func main() {
 	}
 
 	go badServers.Run()
-	//go negResultCache.RunNeg()
-	//go resultCache.Run()
+	go negResultCache.RunNeg()
 	go rrCache.Run()
 
 	resolveHints()
