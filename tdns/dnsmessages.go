@@ -380,6 +380,10 @@ func (p *PacketReader) GetRR() (rrec *RRec) {
 		result = new(SOAGen)
 	case MX:
 		result = new(MXGen)
+	case DNSKEY:
+		result = new(DNSKEYGen)
+	case DS:
+		result = new(DSGen)
 	default:
 		result = new(UnknownGen)
 	}

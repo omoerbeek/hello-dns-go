@@ -18,6 +18,7 @@ package tdns
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net"
 )
@@ -164,4 +165,63 @@ func (m *MXGen) ToMessage(w *MessageWriter) []byte {
 
 func (m *MXGen) String() string {
 	return fmt.Sprintf("%d %s", m.Prio, m.Name)
+}
+
+// drijf.net.              172641  IN      DNSKEY  257 3 13 sRZY2pRVWIlF3fgbeFEdC1RkM9g26LwCEIT5Ti7hvNIDcyzvKb6Fo+Oz 8uqZQG5XxXStXdOiFU2tTewX/7eorg==
+
+type DNSKEYGen struct {
+	Flags uint16
+	Protocol uint8
+	Algorithm uint8
+	PubKey []byte
+}
+
+func (k *DNSKEYGen) Gen(r *PacketReader, l uint16) {
+	k.Flags = r.getUint16(nil)
+	k.Protocol = r.getUint8(nil)
+	k.Algorithm = r.getUint8(nil)
+	k.PubKey = r.getBlob(l - 4, nil)
+}
+
+func (k *DNSKEYGen) ToMessage(w *MessageWriter) []byte {
+	var buf bytes.Buffer
+	XfrUInt16(&buf, k.Flags)
+	XfrUInt8(&buf, k.Protocol)
+	XfrUInt8(&buf, k.Algorithm)
+	XfrBlob(&buf, k.PubKey)
+	return buf.Bytes()
+}
+
+
+func (k *DNSKEYGen) String() string {
+	key := base64.StdEncoding.EncodeToString(k.PubKey)
+	return fmt.Sprintf("%d %d %d %s", k.Flags, k.Protocol, k.Algorithm, key)
+}
+
+type DSGen struct {
+	KeyTag uint16
+	Algorithm uint8
+	DigestType uint8
+	Digest []byte
+}
+
+func (k *DSGen) Gen(r *PacketReader, l uint16) {
+	k.KeyTag = r.getUint16(nil)
+	k.Algorithm = r.getUint8(nil)
+	k.DigestType = r.getUint8(nil)
+	k.Digest = r.getBlob(l - 4, nil)
+}
+
+func (k *DSGen) ToMessage(w *MessageWriter) []byte {
+	var buf bytes.Buffer
+	XfrUInt16(&buf, k.KeyTag)
+	XfrUInt8(&buf, k.Algorithm)
+	XfrUInt8(&buf, k.DigestType)
+	XfrBlob(&buf, k.Digest)
+	return buf.Bytes()
+}
+
+func (k *DSGen) String() string {
+	d := base64.StdEncoding.EncodeToString(k.Digest)
+	return fmt.Sprintf("%d %d %d %s", k.KeyTag, k.Algorithm, k.DigestType, d)
 }
