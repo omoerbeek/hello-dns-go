@@ -125,6 +125,13 @@ func (rc *ResultCache) Put(name *Name, dnstype Type, r *ResolveResult, err error
 	rc.mutex.Unlock()
 }
 
+func (rc *ResultCache) Del(name *Name, dnstype Type) {
+	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
+	rc.mutex.Lock()
+	delete(rc.results, k)
+	rc.mutex.Unlock()
+}
+
 func (rc *ResultCache) Info() string {
 	rc.mutex.Lock()
 	lb := len(rc.results)
@@ -378,6 +385,15 @@ func (c *cacheReader) Class() Class {
 
 func (c *cacheReader) Reset() {
 	c.pos = 0
+}
+
+func (c *cacheReader) Answers() bool {
+	for _, r := range c.rr {
+		if r.Section == Answer {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *RRCache) GetRRSet(name *Name, dnstype Type) MessageReaderInterface {

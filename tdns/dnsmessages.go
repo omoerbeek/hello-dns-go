@@ -223,6 +223,7 @@ type MessageReaderInterface interface {
 	Type() Type
 	Class() Class
 	FromCache() bool
+	Answers() bool
 }
 
 type PacketReader struct {
@@ -259,6 +260,10 @@ func (p *PacketReader) Type() Type {
 
 func (p *PacketReader) Class() Class {
 	return p.class
+}
+
+func (p *PacketReader) Answers() bool {
+	return true
 }
 
 func (p *PacketReader) String() string {
