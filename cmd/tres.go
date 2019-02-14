@@ -44,7 +44,7 @@ type (
 	}
 
 	NxdomainError struct{}
-	NodataError struct{}
+	NodataError   struct{}
 )
 
 var (
@@ -379,7 +379,7 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 
 			// Pick up nameservers. We check if glue records are within the authority
 			// of what we approached this server for.
-			if (reader.FromCache() || rrec.Section == tdns.Authority) && rrec.Type == tdns.NS {
+			if rrec.Section == tdns.Authority && rrec.Type == tdns.NS {
 				if name.IsPartOf(&rrec.Name) {
 					nsname := rrec.Data.(*tdns.NSGen).NSName
 					nsses[nsname.K()] = nsname
@@ -387,7 +387,7 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 				} else {
 					resolver.log("Authoritative server gave us NS record to which this query does not belong")
 				}
-			} else if (reader.FromCache() || rrec.Section == tdns.Additional) && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
+			} else if rrec.Section == tdns.Additional && nsses[rrec.Name.K()] != nil && (rrec.Type == tdns.A || rrec.Type == tdns.AAAA) {
 				if rrec.Name.IsPartOf(auth) {
 					switch a := rrec.Data.(type) {
 					case *tdns.AGen:
@@ -399,13 +399,13 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					resolver.log("Not accepting IP address of %s: out of authority of this server", rrec.Name.String())
 				}
 			}
-			if (reader.FromCache() || rrec.Section == tdns.Authority) && rrec.Type == tdns.SOA {
+			if rrec.Section == tdns.Authority && rrec.Type == tdns.SOA {
 				ret.Auths = append(ret.Auths, rrec)
 			}
 
-			if reader.FromCache() || reader.DH().Bit(tdns.AaMask) == 1 {
+			if reader.DH().Bit(tdns.AaMask) == 1 {
 				// Authoritative answer. We trust this.
-				if (reader.FromCache() || rrec.Section == tdns.Answer) && name.Equals(&rrec.Name) && dnstype == rrec.Type {
+				if rrec.Section == tdns.Answer && name.Equals(&rrec.Name) && dnstype == rrec.Type {
 					resolver.log("We got an answer to our question!")
 					ret.Answers = append(ret.Answers, rrec)
 				} else if name.Equals(&rrec.Name) && rrec.Type == tdns.CNAME {
@@ -413,7 +413,7 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					target := rrec.Data.(*tdns.CNAMEGen).CName
 					ret.Intermediates = append(ret.Intermediates, rrec)
 					resolver.log("We got a CNAME to %s, chasing", name.String())
-					if target.IsPartOf(auth) {
+					if !reader.FromCache() && target.IsPartOf(auth) {
 						resolver.log("Target %s is within %s, harvesting from packet", target, auth)
 						hadMatch := false
 						for hrrec := reader.GetRR(); hrrec != nil; hrrec = reader.GetRR() {
@@ -563,22 +563,6 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 
 	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots)
 
-	resolver.log("Result of query for %s|%s %d/%d", reader.Name().String(), reader.Type(), len(res.Intermediates), len(res.Answers))
-	for _, r := range res.Intermediates {
-		resolver.log("%s", r.String())
-	}
-	for _, r := range res.Answers {
-		resolver.log("%s", r.String())
-	}
-
-	resolver.log("Numqueries: %d", resolver.numQueries)
-	resolver.log("BadServer: %s", badServers.Info())
-	resolver.log("NegResultCache: %s", negResultCache.Info())
-	//resolver.log("RRCache: %s\n%s\n", rrCache.Info(), rrCache.String())
-	resolver.log("RRCache: %s\n", rrCache.Info())
-
-	// XXX numqueries
-
 	switch err.(type) {
 	case nil:
 		//for _, _ = range res.Auths {
@@ -603,6 +587,19 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 		writer.DH.SetRcode(tdns.Nxdomain)
 	}
 	conn.WriteTo(writer.Serialize(), address)
+
+	resolver.log("Result of query for %s|%s %d/%d", reader.Name().String(), reader.Type(), len(res.Intermediates), len(res.Answers))
+	for _, r := range res.Intermediates {
+		resolver.log("%s", r.String())
+	}
+	for _, r := range res.Answers {
+		resolver.log("%s", r.String())
+	}
+
+	resolver.log("Numqueries: %d", resolver.numQueries)
+	resolver.log("BadServer: %s", badServers.Info())
+	resolver.log("NegResultCache: %s", negResultCache.Info())
+	resolver.log("RRCache: %s\n", rrCache.Info())
 }
 
 func doListen(listenAddress string) {

@@ -152,7 +152,7 @@ func (rc *ResultCache) cleanup() {
 func (rc *ResultCache) cleanupNeg() {
 	now := time.Now()
 	rc.mutex.Lock()
-	outer:
+outer:
 	for k, results := range rc.results {
 		if now.After(results.ttd) {
 			delete(rc.results, k)
@@ -209,14 +209,15 @@ func (rc *ResultCache) RunNeg() {
 }
 
 type (
-	cacheEntry struct {
-		rRec      *RRec
-		timestamp time.Time
+	cacheHeader struct {
+		dh           Header
+		timestamp    time.Time
+		cacheEntries map[string]*RRec
 	}
 
 	RRCache struct {
 		mutex sync.Mutex
-		rr    map[string]map[string]cacheEntry
+		rr    map[string]*cacheHeader
 	}
 
 	NameIP struct {
@@ -225,14 +226,17 @@ type (
 	}
 )
 
-func (ce *cacheEntry) String() string {
-	now := time.Now()
-	ttl := computeTTL(now, ce.timestamp, ce.rRec.TTL)
-	return fmt.Sprintf("%s %d", ce.rRec.String(), ttl)
+//func (ce *cacheEntry) StringWithTimes(now, timestamp time.Time) string {
+//	ttl := computeTTL(now, timestamp, ce.rRec.TTL)
+//	return fmt.Sprintf("%s %d", ce.rRec.String(), ttl)
+//}
+
+func (ch *cacheHeader) String() string {
+	return fmt.Sprintf("%s %v", ch.dh.String(), ch.cacheEntries)
 }
 
 func NewRRCache() *RRCache {
-	return &RRCache{rr: make(map[string]map[string]cacheEntry)}
+	return &RRCache{rr: make(map[string]*cacheHeader)}
 }
 
 func (c *RRCache) Size() int {
@@ -244,11 +248,7 @@ func (c *RRCache) String() string {
 	for n, vv := range c.rr {
 		buf.WriteString(n)
 		buf.WriteString("\n")
-		for _, v := range vv {
-			buf.WriteString("\t")
-			buf.WriteString(v.String())
-			buf.WriteString("\n")
-		}
+		buf.WriteString(vv.String())
 	}
 	return buf.String()
 }
@@ -267,71 +267,73 @@ func (c *RRCache) Put(m MessageReaderInterface) {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
 		k2 := rrec.String()
 		if c.rr[k1] == nil {
-			c.rr[k1] = make(map[string]cacheEntry)
+			c.rr[k1] = &cacheHeader{cacheEntries: make(map[string]*RRec)}
 		}
-		c.rr[k1][k2] = cacheEntry{rrec, t}
+		c.rr[k1].dh = *m.DH()
+		c.rr[k1].timestamp = t
+		c.rr[k1].cacheEntries[k2] = rrec
 	}
 	c.mutex.Unlock()
 	m.Reset()
 }
 
-func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, bool) {
+func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, Header, bool) {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 	c.mutex.Lock()
 	rrset, ok := c.rr[k]
 	c.mutex.Unlock()
 
 	if !ok {
-		return nil, false
+		return nil, Header{}, false
 	}
 
 	var ret []RRec
 	now := time.Now()
-	for _, cachentry := range rrset {
-		newttl := computeTTL(now, cachentry.timestamp, cachentry.rRec.TTL)
+	for _, cachentry := range rrset.cacheEntries {
+		newttl := computeTTL(now, rrset.timestamp, cachentry.TTL)
 		if newttl < 1 {
 			continue // or return empty set?
 		}
 		// Make a copy
-		item := *cachentry.rRec
+		item := *cachentry
 		item.TTL = newttl
 		ret = append(ret, item)
 	}
 	if len(ret) == 0 {
-		return nil, false
+		return nil, Header{}, false
 	}
 
-	return ret, true
+	return ret, rrset.dh, true
 }
 
-func (c *RRCache) get(name *Name, dnstype Type) ([]RRec, bool) {
+func (c *RRCache) get(name *Name, dnstype Type) ([]RRec, Header, bool) {
 	for e := name.Name.Front(); e != nil; e = e.Next() {
 		tname := NewNameFromTail(e)
-		set, ok := c.getByName(tname, dnstype)
+		set, dh, ok := c.getByName(tname, dnstype)
 		if !ok {
 			continue
 		} else {
-			return set, true
+			return set, dh, true
 		}
 	}
-	return nil, false
+	return nil, Header{}, false
 }
 
 func (c *RRCache) GetNS(name *Name) []NameIP {
-	set, ok := c.get(name, NS)
+	set, _, ok := c.get(name, NS)
 	if !ok {
 		return nil
 	}
 	var ret []NameIP
 	for _, s := range set {
 		ns := s.Data.(*NSGen).NSName
-		as, ok := c.get(ns, A)
+		as, _, ok := c.get(ns, A)
 		if ok {
 			for _, a := range as {
 				ret = append(ret, NameIP{s.Name.String(), a.Data.(*AGen).IP})
 			}
 		}
-		aaaas, ok := c.get(ns, AAAA)
+		aaaas, _, ok := c.get(ns, AAAA)
 		if ok {
 			for _, a := range aaaas {
 				ret = append(ret, NameIP{s.Name.String(), a.Data.(*AAAAGen).IP})
@@ -351,7 +353,7 @@ type cacheReader struct {
 	dnstype Type
 	class   Class
 	rr      []RRec
-	pos		int
+	pos     int
 }
 
 func (c *cacheReader) FromCache() bool {
@@ -379,19 +381,13 @@ func (c *cacheReader) Reset() {
 }
 
 func (c *RRCache) GetRRSet(name *Name, dnstype Type) MessageReaderInterface {
-	m := cacheReader{name: name, dnstype: dnstype, class: IN}
+	//m := cacheReader{name: name, dnstype: dnstype, class: IN}
 
-	if rrset, ok := c.getByName(name, dnstype); ok {
-		m.rr = rrset
-		return &m
+	if rrset, dh, ok := c.getByName(name, dnstype); ok {
+		return &cacheReader{name: name, dnstype: dnstype, class: IN, rr: rrset, dh: dh}
 	}
-	if rrset, ok := c.getByName(name, CNAME); ok {
-		m.rr = rrset
-		return &m
-	}
-	if rrset, ok := c.get(name, dnstype); ok {
-		m.rr = rrset
-		return &m
+	if rrset, dh, ok := c.getByName(name, CNAME); ok {
+		return &cacheReader{name: name, dnstype: dnstype, class: IN, rr: rrset, dh: dh}
 	}
 	return nil
 }
@@ -409,14 +405,14 @@ func (c *RRCache) cleanup() {
 	c.mutex.Lock()
 	now := time.Now()
 	for key, cachentries := range c.rr {
-		for n, cachentry := range cachentries {
+		for n, cachentry := range cachentries.cacheEntries {
 			//fmt.Println(cachentry.String())
-			newttl := computeTTL(now, cachentry.timestamp, cachentry.rRec.TTL)
+			newttl := computeTTL(now, cachentries.timestamp, cachentry.TTL)
 			if newttl < 1 {
-				delete(cachentries, n)
+				delete(cachentries.cacheEntries, n)
 			}
 		}
-		if len(cachentries) == 0 {
+		if len(cachentries.cacheEntries) == 0 {
 			delete(c.rr, key)
 		}
 	}
