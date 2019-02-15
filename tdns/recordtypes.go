@@ -18,8 +18,11 @@ package tdns
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"hash"
 	"net"
 )
 
@@ -198,6 +201,23 @@ func (k *DNSKEYGen) String() string {
 	return fmt.Sprintf("%d %d %d %s", k.Flags, k.Protocol, k.Algorithm, key)
 }
 
+func (k *DNSKEYGen) Digest(name *Name, digesttype uint8) []byte {
+	var f hash.Hash = nil
+	switch digesttype {
+	case 1:
+		f = sha1.New()
+	case 2:
+		f = sha256.New()
+	}
+	var res []byte
+	if f != nil {
+		f.Write(name.Bytes())
+		f.Write(k.ToMessage(nil))
+		res = f.Sum(nil)
+	}
+	return res
+}
+
 type DSGen struct {
 	KeyTag uint16
 	Algorithm uint8
@@ -205,23 +225,24 @@ type DSGen struct {
 	Digest []byte
 }
 
-func (k *DSGen) Gen(r *PacketReader, l uint16) {
-	k.KeyTag = r.getUint16(nil)
-	k.Algorithm = r.getUint8(nil)
-	k.DigestType = r.getUint8(nil)
-	k.Digest = r.getBlob(l - 4, nil)
+func (d *DSGen) Gen(r *PacketReader, l uint16) {
+	d.KeyTag = r.getUint16(nil)
+	d.Algorithm = r.getUint8(nil)
+	d.DigestType = r.getUint8(nil)
+	d.Digest = r.getBlob(l - 4, nil)
 }
 
-func (k *DSGen) ToMessage(w *MessageWriter) []byte {
+func (d *DSGen) ToMessage(w *MessageWriter) []byte {
 	var buf bytes.Buffer
-	XfrUInt16(&buf, k.KeyTag)
-	XfrUInt8(&buf, k.Algorithm)
-	XfrUInt8(&buf, k.DigestType)
-	XfrBlob(&buf, k.Digest)
+	XfrUInt16(&buf, d.KeyTag)
+	XfrUInt8(&buf, d.Algorithm)
+	XfrUInt8(&buf, d.DigestType)
+	XfrBlob(&buf, d.Digest)
 	return buf.Bytes()
 }
 
-func (k *DSGen) String() string {
-	d := base64.StdEncoding.EncodeToString(k.Digest)
-	return fmt.Sprintf("%d %d %d %s", k.KeyTag, k.Algorithm, k.DigestType, d)
+func (d *DSGen) String() string {
+	digest := base64.StdEncoding.EncodeToString(d.Digest)
+	return fmt.Sprintf("%d %d %d %s", d.KeyTag, d.Algorithm, d.DigestType, digest)
 }
+

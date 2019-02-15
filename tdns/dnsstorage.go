@@ -17,6 +17,7 @@
 package tdns
 
 import (
+	"bytes"
 	"container/list"
 	"fmt"
 	"strings"
@@ -262,6 +263,18 @@ func (n *Name) string() string {
 		b.WriteString(".")
 	}
 	return b.String()
+}
+
+func (n *Name) Bytes() []byte {
+	var b bytes.Buffer
+
+	for e := n.Name.Front(); e != nil; e = e.Next() {
+		l := e.Value.(*Label)
+		XfrUInt8(&b, uint8(l.Len()))
+		XfrBlob(&b, l.Label)
+	}
+	XfrUInt8(&b, uint8(0))
+	return b.Bytes()
 }
 
 func (n *Name) Len() int {

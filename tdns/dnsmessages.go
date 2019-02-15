@@ -41,7 +41,14 @@ type (
 )
 
 func (r *RRec) String() string {
-	return fmt.Sprintf("%-30s\t%d\t%v\t%v", &r.Name, r.TTL, r.Type, r.Data)
+	extra := ""
+	if r.Type == DNSKEY {
+		rec := r.Data.(*DNSKEYGen)
+		sha1 := rec.Digest(&r.Name, 1)
+		sha256 := rec.Digest(&r.Name, 2)
+		extra = fmt.Sprintf("; SHA1=%X SHA256=%X)", sha1, sha256)
+	}
+	return fmt.Sprintf("%-30s\t%d\t%v\t%v%s", &r.Name, r.TTL, r.Type, r.Data, extra)
 }
 
 func XfrUInt32(b *bytes.Buffer, val uint32) {
