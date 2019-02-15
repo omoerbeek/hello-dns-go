@@ -219,7 +219,7 @@ type (
 	cacheHeader struct {
 		dh           Header
 		timestamp    time.Time
-		cacheEntries map[string]*RRec
+		cacheEntries map[int]*RRec
 	}
 
 	RRCache struct {
@@ -232,11 +232,6 @@ type (
 		IP   net.IP
 	}
 )
-
-//func (ce *cacheEntry) StringWithTimes(now, timestamp time.Time) string {
-//	ttl := computeTTL(now, timestamp, ce.rRec.TTL)
-//	return fmt.Sprintf("%s %d", ce.rRec.String(), ttl)
-//}
 
 func (ch *cacheHeader) String() string {
 	return fmt.Sprintf("%s %v", ch.dh.String(), ch.cacheEntries)
@@ -272,13 +267,14 @@ func (c *RRCache) Put(m MessageReaderInterface) {
 	c.mutex.Lock()
 	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
-		k2 := rrec.String()
-		if c.rr[k1] == nil {
-			c.rr[k1] = &cacheHeader{cacheEntries: make(map[string]*RRec)}
-		}
+		c.rr[k1] = &cacheHeader{cacheEntries: make(map[int]*RRec)}
+	}
+	m.Reset()
+	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
+		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
 		c.rr[k1].dh = *m.DH()
 		c.rr[k1].timestamp = t
-		c.rr[k1].cacheEntries[k2] = rrec
+		c.rr[k1].cacheEntries[len(c.rr[k1].cacheEntries)] = rrec
 	}
 	c.mutex.Unlock()
 	m.Reset()
@@ -288,7 +284,7 @@ func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, Header, bool) {
 	k := fmt.Sprintf("%s/%s", name.K(), dnstype.String())
 	c.mutex.Lock()
 	rrset, ok := c.rr[k]
-	c.mutex.Unlock()
+	defer c.mutex.Unlock()
 
 	if !ok {
 		return nil, Header{}, false

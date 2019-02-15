@@ -45,6 +45,7 @@ type (
 
 	NxdomainError struct{}
 	NodataError   struct{}
+	Servfail      struct{}
 )
 
 var (
@@ -66,6 +67,10 @@ func (NxdomainError) Error() string {
 
 func (NodataError) Error() string {
 	return "Nodata"
+}
+
+func (Servfail) Error() string {
+	return "Servfail"
 }
 
 func NewNameIPSet() NameIPSet {
@@ -309,6 +314,13 @@ func (resolver *DNSResolver) resolveAt(name *tdns.Name, dnstype tdns.Type, depth
 
 func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet) (ret tdns.ResolveResult, err error) {
 
+	if resolver.numQueries > 100 {
+		err = Servfail{}
+		return
+	}
+	oldprefix := resolver.logprefix
+	resolver.logprefix = fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), name, dnstype)
+	defer func() { resolver.logprefix = oldprefix }()
 	resolver.log("Starting query at authority = %s, have %d addresses to try", auth, mservers.Size())
 
 	nsservers := rrCache.GetNS(name)
@@ -490,7 +502,8 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			for _, t := range []tdns.Type{tdns.A, tdns.AAAA} {
 				newns := NewNameIPSet()
 				resolver.log("Attempting to resolve NS %s|%s", n.String(), t)
-				result, err := resolver.resolveAt1(&n, t, depth+1, tdns.MakeName(""), &roots)
+				var result tdns.ResolveResult
+				result, err = resolver.resolveAt1(&n, t, depth+1, tdns.MakeName(""), &roots)
 				if err != nil {
 					resolver.log("Failed to resolve ns name for %s %s: %s, trying next server (if there)", n.String(), t, err)
 					continue
@@ -508,7 +521,8 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					resolver.log("Failed to resolve name for %s %s", n.String(), t)
 					continue
 				}
-				res2, err := resolver.resolveAt1(name, dnstype, depth+1, &newAuth, &newns)
+				var res2 tdns.ResolveResult
+				res2, err = resolver.resolveAt1(name, dnstype, depth+1, &newAuth, &newns)
 				if err != nil {
 					_, isNd := err.(NodataError)
 					_, isNx := err.(NxdomainError)
@@ -592,10 +606,13 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 		}
 		resolver.log("Nxdomain for %s|%s", reader.Name().String(), reader.Type())
 		writer.DH.SetRcode(tdns.Nxdomain)
+	case Servfail:
+		resolver.log("Servfail for %s|%s", reader.Name().String(), reader.Type())
+		writer.DH.SetRcode(tdns.Servfail)
 	}
 	conn.WriteTo(writer.Serialize(), address)
 
-	resolver.log("Result of query for %s|%s %d/%d", reader.Name().String(), reader.Type(), len(res.Intermediates), len(res.Answers))
+	resolver.log("Result of query for %s|%s %v %d/%d", reader.Name().String(), reader.Type(), err, len(res.Intermediates), len(res.Answers))
 	for _, r := range res.Intermediates {
 		resolver.log("%s", r.String())
 	}
