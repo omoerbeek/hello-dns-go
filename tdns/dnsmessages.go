@@ -44,8 +44,8 @@ func (r *RRec) String() string {
 	extra := ""
 	if r.Type == DNSKEY {
 		rec := r.Data.(*DNSKEYGen)
-		sha1 := rec.Digest(&r.Name, 1)
-		sha256 := rec.Digest(&r.Name, 2)
+		sha1 := rec.Digest(&r.Name, SHA1)
+		sha256 := rec.Digest(&r.Name, SHA256)
 		extra = fmt.Sprintf("; SHA1=%X SHA256=%X)", sha1, sha256)
 	}
 	return fmt.Sprintf("%-30s\t%d\t%v\t%v%s", &r.Name, r.TTL, r.Type, r.Data, extra)
@@ -463,3 +463,4 @@ func (p *PacketReader) getName(pos *uint16) *Name {
 	}
 	return ret
 }
+

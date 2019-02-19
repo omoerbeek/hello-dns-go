@@ -18,11 +18,8 @@ package tdns
 
 import (
 	"bytes"
-	"crypto/sha1"
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"hash"
 	"net"
 )
 
@@ -172,71 +169,39 @@ func (m *MXGen) String() string {
 
 // drijf.net.              172641  IN      DNSKEY  257 3 13 sRZY2pRVWIlF3fgbeFEdC1RkM9g26LwCEIT5Ti7hvNIDcyzvKb6Fo+Oz 8uqZQG5XxXStXdOiFU2tTewX/7eorg==
 
-type DNSKEYGen struct {
-	Flags uint16
-	Protocol uint8
-	Algorithm uint8
-	PubKey []byte
-}
-
 func (k *DNSKEYGen) Gen(r *PacketReader, l uint16) {
-	k.Flags = r.getUint16(nil)
-	k.Protocol = r.getUint8(nil)
-	k.Algorithm = r.getUint8(nil)
-	k.PubKey = r.getBlob(l - 4, nil)
+	k.Flags = Flags(r.getUint16(nil))
+	k.Protocol = Protocol(r.getUint8(nil))
+	k.Algorithm = Algorithm(r.getUint8(nil))
+	k.PubKey = r.getBlob(l-4, nil)
 }
 
-func (k *DNSKEYGen) ToMessage(w *MessageWriter) []byte {
+func (k *DNSKEYGen) ToMessage(*MessageWriter) []byte {
 	var buf bytes.Buffer
-	XfrUInt16(&buf, k.Flags)
-	XfrUInt8(&buf, k.Protocol)
-	XfrUInt8(&buf, k.Algorithm)
+	XfrUInt16(&buf, uint16(k.Flags))
+	XfrUInt8(&buf, uint8(k.Protocol))
+	XfrUInt8(&buf, uint8(k.Algorithm))
 	XfrBlob(&buf, k.PubKey)
 	return buf.Bytes()
 }
-
 
 func (k *DNSKEYGen) String() string {
 	key := base64.StdEncoding.EncodeToString(k.PubKey)
 	return fmt.Sprintf("%d %d %d %s", k.Flags, k.Protocol, k.Algorithm, key)
 }
 
-func (k *DNSKEYGen) Digest(name *Name, digesttype uint8) []byte {
-	var f hash.Hash = nil
-	switch digesttype {
-	case 1:
-		f = sha1.New()
-	case 2:
-		f = sha256.New()
-	}
-	var res []byte
-	if f != nil {
-		f.Write(name.Bytes())
-		f.Write(k.ToMessage(nil))
-		res = f.Sum(nil)
-	}
-	return res
-}
-
-type DSGen struct {
-	KeyTag uint16
-	Algorithm uint8
-	DigestType uint8
-	Digest []byte
-}
-
 func (d *DSGen) Gen(r *PacketReader, l uint16) {
-	d.KeyTag = r.getUint16(nil)
-	d.Algorithm = r.getUint8(nil)
-	d.DigestType = r.getUint8(nil)
-	d.Digest = r.getBlob(l - 4, nil)
+	d.KeyTag = KeyTag(r.getUint16(nil))
+	d.Algorithm = Algorithm(r.getUint8(nil))
+	d.DigestType = DigestType(r.getUint8(nil))
+	d.Digest = r.getBlob(l-4, nil)
 }
 
 func (d *DSGen) ToMessage(w *MessageWriter) []byte {
 	var buf bytes.Buffer
-	XfrUInt16(&buf, d.KeyTag)
-	XfrUInt8(&buf, d.Algorithm)
-	XfrUInt8(&buf, d.DigestType)
+	XfrUInt16(&buf, uint16(d.KeyTag))
+	XfrUInt8(&buf, uint8(d.Algorithm))
+	XfrUInt8(&buf, uint8(d.DigestType))
 	XfrBlob(&buf, d.Digest)
 	return buf.Bytes()
 }
@@ -245,4 +210,3 @@ func (d *DSGen) String() string {
 	digest := base64.StdEncoding.EncodeToString(d.Digest)
 	return fmt.Sprintf("%d %d %d %s", d.KeyTag, d.Algorithm, d.DigestType, digest)
 }
-

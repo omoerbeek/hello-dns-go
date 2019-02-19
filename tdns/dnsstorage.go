@@ -24,9 +24,9 @@ import (
 )
 
 type (
-	RCode   uint8
-	Type    uint16
-	Class   uint16
+	RCode uint8
+	Type uint16
+	Class uint16
 	Section uint16
 
 	Label struct {
@@ -46,6 +46,26 @@ type (
 		ANCount uint16
 		NSCount uint16
 		ARCount uint16
+	}
+
+	Flags uint16
+	Protocol uint8
+	Algorithm uint8
+	KeyTag uint16
+	DigestType uint8
+
+	DNSKEYGen struct {
+		Flags     Flags
+		Protocol  Protocol
+		Algorithm Algorithm
+		PubKey    []byte
+	}
+
+	DSGen struct {
+		KeyTag     KeyTag
+		Algorithm  Algorithm
+		DigestType DigestType
+		Digest     []byte
 	}
 )
 
@@ -100,6 +120,11 @@ const (
 	AdMask     = 0x0020
 	CdMask     = 0x0010
 	RcodeMask  = 0x000f
+
+	SHA1   DigestType = 1
+	SHA256            = 2
+	GOST              = 3
+	SHA384            = 4
 )
 
 func (h *Header) String() string {
@@ -312,6 +337,14 @@ func (n *Name) Append(b *Name) {
 func (n *Name) PushBack(l *Label) {
 	n.Name.PushBack(l)
 	n.key = n.string()
+}
+
+func (n *Name) Parent() *Name {
+	if n.Empty() {
+		return NewName([]string{})
+	}
+	el := n.Name.Front()
+	return NewNameFromTail(el.Next())
 }
 
 func (n *Name) IsPartOf(root *Name) bool {

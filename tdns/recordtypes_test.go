@@ -33,11 +33,28 @@ func TestDNSKeyDigest(t *testing.T) {
 	}
 	dnskey := DNSKEYGen{Flags: 257, Protocol: 3, Algorithm: 5, PubKey: pubkey}
 
-	digest := dnskey.Digest(name, 2)
+	digest := dnskey.Digest(name, SHA256)
 	expected, err := hex.DecodeString("44388b3de9a22cafa8a12883f60a0f984472d0dfef0f63ed59a29be018658b28")
+	if err != nil {
+		t.Errorf("Decoding2")
+	}
+
+	if bytes.Compare(digest, expected) != 0 {
+		t.Errorf("Got %X, expected %X", digest, expected)
+	}
+}
+
+func TestDNSKeyDigestRoot(t *testing.T) {
+	name := MakeName("")
+	pubkey, err := base64.StdEncoding.DecodeString(
+		"AwEAAaz/tAm8yTn4Mfeh5eyI96WSVexTBAvkMgJzkKTOiW1vkIbzxeF3+/4RgWOq7HrxRixHlFlExOLAJr5emLvN7SWXgnLh4+B5xQlNVz8Og8kvArMtNROxVQuCaSnIDdD5LKyWbRd2n9WGe2R8PzgCmr3EgVLrjyBxWezF0jLHwVN8efS3rCj/EWgvIWgb9tarpVUDK/b58Da+sqqls3eNbuv7pr+eoZG+SrDK6nWeL3c6H5Apxz7LjVc1uTIdsIXxuOLYA4/ilBmSVIzuDWfdRUfhHdY6+cn8HFRm+2hM8AnXGXws9555KrUB5qihylGa8subX2Nn6UwNR1AkUTV74bU=")
 	if err != nil {
 		t.Errorf("Decoding1")
 	}
+	dnskey := DNSKEYGen{Flags: 257, Protocol: 3, Algorithm: 8, PubKey: pubkey}
+
+	digest := dnskey.Digest(name, SHA256)
+	expected := TrustAnchor[1].Data.(*DSGen).Digest
 
 	if bytes.Compare(digest, expected) != 0 {
 		t.Errorf("Got %X, expected %X", digest, expected)

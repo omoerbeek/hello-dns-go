@@ -386,6 +386,27 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
+		if dnstype == tdns.DNSKEY {
+			var dsrecords []*tdns.RRec
+			if name.Empty() {
+				dsrecords = tdns.TrustAnchor
+			} else {
+				//parent := name.Parent()
+				var ds tdns.ResolveResult
+				ds, err = resolver.resolveAt(name, tdns.DS, depth + 1, tdns.MakeName("."), &roots)
+				if err == nil {
+					dsrecords = ds.Answers
+				} else {
+					return
+				}
+			}
+			resolver.log("Going to validate %s with %v", name, dsrecords)
+			err = tdns.Validate(reader, dsrecords)
+			resolver.log("Validate %s returned %v", name, err)
+			if err != nil {
+				return
+			}
+		}
 		// XXX Cache poisoning!
 		rrCache.Put(reader)
 
