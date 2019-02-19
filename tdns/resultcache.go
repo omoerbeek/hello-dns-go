@@ -333,13 +333,13 @@ func (c *RRCache) GetNS(name *Name) []NameIP {
 		as, _, ok := c.get(ns, A)
 		if ok {
 			for _, a := range as {
-				ret = append(ret, NameIP{s.Name.String(), a.Data.(*AGen).IP})
+				ret = append(ret, NameIP{a.Name.String(), a.Data.(*AGen).IP})
 			}
 		}
 		aaaas, _, ok := c.get(ns, AAAA)
 		if ok {
 			for _, a := range aaaas {
-				ret = append(ret, NameIP{s.Name.String(), a.Data.(*AAAAGen).IP})
+				ret = append(ret, NameIP{a.Name.String(), a.Data.(*AAAAGen).IP})
 			}
 		}
 	}
