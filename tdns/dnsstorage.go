@@ -24,9 +24,9 @@ import (
 )
 
 type (
-	RCode uint8
-	Type uint16
-	Class uint16
+	RCode   uint8
+	Type    uint16
+	Class   uint16
 	Section uint16
 
 	Label struct {
@@ -48,25 +48,13 @@ type (
 		ARCount uint16
 	}
 
-	Flags uint16
-	Protocol uint8
-	Algorithm uint8
-	KeyTag uint16
+	Flags      uint16
+	Protocol   uint8
+	Algorithm  uint8
+	KeyTag     uint16
 	DigestType uint8
 
-	DNSKEYGen struct {
-		Flags     Flags
-		Protocol  Protocol
-		Algorithm Algorithm
-		PubKey    []byte
-	}
-
-	DSGen struct {
-		KeyTag     KeyTag
-		Algorithm  Algorithm
-		DigestType DigestType
-		Digest     []byte
-	}
+	Time uint32
 )
 
 const (
@@ -455,7 +443,7 @@ func MakeType(str string) Type {
 func (t Type) String() string {
 	ret := typemap2[t]
 	if ret == "" {
-		return fmt.Sprintf("%#x", t)
+		return fmt.Sprintf("TYPE%d", uint16(t))
 	}
 	return ret
 }
@@ -463,7 +451,7 @@ func (t Type) String() string {
 func (s Section) String() string {
 	ret := sectionmap2[s]
 	if ret == "" {
-		return fmt.Sprintf("%#x", s)
+		return fmt.Sprintf("%#x", uint16(s))
 	}
 	return ret
 }
@@ -471,7 +459,11 @@ func (s Section) String() string {
 func (r RCode) String() string {
 	ret := rcodemap2[r]
 	if ret == "" {
-		return fmt.Sprintf("%#x", r)
+		return fmt.Sprintf("%#x", uint16(r))
 	}
 	return ret
+}
+
+func (t Time) String() string {
+	return fmt.Sprintf("%d", t)
 }
