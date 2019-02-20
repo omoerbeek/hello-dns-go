@@ -115,7 +115,7 @@ func (a *CNAMEGen) String() string {
 }
 
 type SOAGen struct {
-	MName, RName *Name
+	MName, RName                            *Name
 	Serial, Refresh, Retry, Expire, Minimum uint32
 }
 
@@ -167,6 +167,13 @@ func (m *MXGen) String() string {
 	return fmt.Sprintf("%d %s", m.Prio, m.Name)
 }
 
+type DNSKEYGen struct {
+	Flags     Flags
+	Protocol  Protocol
+	Algorithm Algorithm
+	PubKey    []byte
+}
+
 // drijf.net.              172641  IN      DNSKEY  257 3 13 sRZY2pRVWIlF3fgbeFEdC1RkM9g26LwCEIT5Ti7hvNIDcyzvKb6Fo+Oz 8uqZQG5XxXStXdOiFU2tTewX/7eorg==
 
 func (k *DNSKEYGen) Gen(r *PacketReader, l uint16) {
@@ -190,6 +197,13 @@ func (k *DNSKEYGen) String() string {
 	return fmt.Sprintf("%d %d %d %s", k.Flags, k.Protocol, k.Algorithm, key)
 }
 
+type DSGen struct {
+	KeyTag     KeyTag
+	Algorithm  Algorithm
+	DigestType DigestType
+	Digest     []byte
+}
+
 func (d *DSGen) Gen(r *PacketReader, l uint16) {
 	d.KeyTag = KeyTag(r.getUint16(nil))
 	d.Algorithm = Algorithm(r.getUint8(nil))
@@ -209,4 +223,50 @@ func (d *DSGen) ToMessage(w *MessageWriter) []byte {
 func (d *DSGen) String() string {
 	digest := base64.StdEncoding.EncodeToString(d.Digest)
 	return fmt.Sprintf("%d %d %d %s", d.KeyTag, d.Algorithm, d.DigestType, digest)
+}
+
+type RRSIGGen struct {
+	Type       Type
+	Algorithm  Algorithm
+	Labels     uint8
+	TTL        uint32
+	Expiration Time
+	Inception  Time
+	KeyTag     KeyTag
+	Signer     *Name
+	Signature  []byte
+}
+
+func (rr *RRSIGGen) Gen(r *PacketReader, l uint16) {
+	p1 := r.payloadpos
+	rr.Type = Type(r.getUint16(nil))
+	rr.Algorithm = Algorithm(r.getUint8(nil))
+	rr.Labels = r.getUint8(nil)
+	rr.TTL = r.getUint32(nil)
+	rr.Expiration = Time(r.getUint32(nil))
+	rr.Inception = Time(r.getUint32(nil))
+	rr.KeyTag = KeyTag(r.getUint16(nil))
+	rr.Signer = r.getName(nil)
+	x := l - (r.payloadpos - p1)
+	rr.Signature = r.getBlob(x, nil)
+}
+
+func (r *RRSIGGen) ToMessage(w *MessageWriter) []byte {
+	var buf bytes.Buffer
+	XfrUInt16(&buf, uint16(r.Type))
+	XfrUInt8(&buf, uint8(r.Algorithm))
+	XfrUInt8(&buf, uint8(r.Labels))
+	XfrUInt32(&buf, r.TTL)
+	XfrUInt32(&buf, uint32(r.Expiration))
+	XfrUInt32(&buf, uint32(r.Inception))
+	XfrUInt16(&buf, uint16(r.KeyTag))
+	w.XfrName(&buf, r.Signer, false)
+	XfrBlob(&buf, r.Signature)
+	return buf.Bytes()
+}
+
+func (r *RRSIGGen) String() string {
+	return fmt.Sprintf("%s %d %d %d %s %s %d %s %s",
+		r.Type, r.Algorithm, r.Labels, r.TTL, r.Expiration.String(), r.Inception.String(),
+		r.KeyTag, r.Signer.String(), base64.StdEncoding.EncodeToString(r.Signature))
 }

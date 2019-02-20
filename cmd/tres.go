@@ -323,7 +323,12 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 	defer func() { resolver.logprefix = oldprefix }()
 	resolver.log("Starting query at authority = %s, have %d addresses to try", auth, mservers.Size())
 
-	nsservers := rrCache.GetNS(name)
+	var nsservers []tdns.NameIP
+	if dnstype == tdns.DS {
+		nsservers = rrCache.GetNS(name.Parent())
+	} else {
+		nsservers = rrCache.GetNS(name)
+	}
 
 	var servers []tdns.NameIP
 	if nsservers != nil {
@@ -393,14 +398,14 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			} else {
 				//parent := name.Parent()
 				var ds tdns.ResolveResult
-				ds, err = resolver.resolveAt(name, tdns.DS, depth + 1, tdns.MakeName("."), &roots)
+				ds, err = resolver.resolveAt(name, tdns.DS, depth+1, tdns.MakeName("."), &roots)
 				if err == nil {
 					dsrecords = ds.Answers
 				} else {
 					return
 				}
 			}
-			resolver.log("Going to validate %s with %v", name, dsrecords)
+			resolver.log("Going to validate DNSKEY for %s with %v", name, dsrecords)
 			err = tdns.Validate(reader, dsrecords)
 			resolver.log("Validate %s returned %v", name, err)
 			if err != nil {

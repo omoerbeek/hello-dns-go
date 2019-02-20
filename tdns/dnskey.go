@@ -21,10 +21,17 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"hash"
+)
+
+const (
+	// https://www.iana.org/assignments/dnskey-flags/dnskey-flags.xhtml
+	// Those bit are in network byte order, we define host by order
+	ZONE   Flags = 1 << (15 - 7)
+	REVOKE       = 1 << (15 - 8)
+	SEP          = 1 << (15 - 15)
 )
 
 /*
@@ -75,7 +82,6 @@ func Validate(m MessageReaderInterface, dsrecords []*RRec) error {
 		switch rrec.Type {
 		case DNSKEY:
 			err = ValidateDNSKey(&rrec.Name, rrec.Data.(*DNSKEYGen), dsrecords)
-			fmt.Printf("%s %s ValidateDNSKey returned %v\n", rrec.Name.String(), rrec.Type, err)
 		}
 
 		if err != nil {
@@ -83,23 +89,19 @@ func Validate(m MessageReaderInterface, dsrecords []*RRec) error {
 		}
 	}
 	m.Reset()
-	fmt.Printf("Validate returned %v\n", err)
 	return err
 }
 
 func ValidateDNSKey(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
+
 	keyTag := dnskey.KeyTag()
 	flags := dnskey.Flags
-	fmt.Printf("Computed tag is %v, flags = %d\n", keyTag, flags)
-	if flags&1 == 0 { // XXX check against RFC!
-		return nil
-	}
-	if flags&128 != 0 {
+
+	if flags&REVOKE != 0 {
 		return nil // revoked
 	}
 	ok := false
 	for _, rec := range dsrecords {
-		fmt.Printf("REC is %v\n", rec)
 		ds := rec.Data.(*DSGen)
 		if ds == nil {
 			panic("ds data is nil")
@@ -116,9 +118,7 @@ func ValidateDNSKey(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
 			// XXX Check RFC what to do
 			continue
 		}
-		fmt.Printf("%s DIGEST CHECK\ndnskey=%v\nds=%v\ncomputed=%s\n", name, dnskey, ds, base64.StdEncoding.EncodeToString(computed))
 		if bytes.Compare(computed, ds.Digest) == 0 {
-			fmt.Printf("%s DIGEST COMPARED OK\n", name)
 			ok = true
 		} else {
 			return fmt.Errorf("digest mismatch")
@@ -126,6 +126,11 @@ func ValidateDNSKey(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
 
 	}
 	if ok {
+		return nil
+	}
+	if flags&SEP == 0 {
+		// IF it is not a SEP, no DS validation is needed, but it *should* be signed by a ZSK...
+		// Need to check against RFC!
 		return nil
 	}
 	return fmt.Errorf("no matching digest found")

@@ -391,6 +391,8 @@ func (p *PacketReader) GetRR() (rrec *RRec) {
 		result = new(DNSKEYGen)
 	case DS:
 		result = new(DSGen)
+	case RRSIG:
+		result = new(RRSIGGen)
 	default:
 		result = new(UnknownGen)
 	}
@@ -463,4 +465,3 @@ func (p *PacketReader) getName(pos *uint16) *Name {
 	}
 	return ret
 }
-
