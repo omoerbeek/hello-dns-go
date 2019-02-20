@@ -600,7 +600,7 @@ func resolveHints() {
 
 func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketReader) {
 
-	resolver := DNSResolver{DNSBufSize: 4000, DoIPv6: false}
+	resolver := DNSResolver{DNSBufSize: 4000, DoIPv6: true}
 
 	writer := tdns.NewMessageWriter(reader.Name(), reader.Type(), tdns.IN, math.MaxUint16)
 	writer.DH.SetBitValue(tdns.RdMask, reader.DH().Bit(tdns.RdMask))

@@ -381,6 +381,8 @@ func (p *PacketReader) GetRR() (rrec *RRec) {
 		result = new(AAAAGen)
 	case NS:
 		result = new(NSGen)
+	case PTR:
+		result = new(PTRGen)
 	case CNAME:
 		result = new(CNAMEGen)
 	case SOA:

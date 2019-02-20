@@ -96,6 +96,25 @@ func (a *NSGen) String() string {
 	return a.NSName.String()
 }
 
+type PTRGen struct {
+	PTR *Name
+}
+
+func (a *PTRGen) Gen(r *PacketReader, l uint16) {
+	a.PTR = r.getName(nil)
+}
+
+func (a *PTRGen) ToMessage(w *MessageWriter) []byte {
+	var buf bytes.Buffer
+	w.XfrName(&buf, a.PTR, true)
+	return buf.Bytes()
+}
+
+func (a *PTRGen) String() string {
+	return a.PTR.String()
+}
+
+
 type CNAMEGen struct {
 	CName *Name
 }
