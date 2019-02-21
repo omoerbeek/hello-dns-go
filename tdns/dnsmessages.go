@@ -313,25 +313,25 @@ func (p *PacketReader) Read(data []byte, length int) error {
 	p.rrpos = 0
 
 	if p.dh.QDCount > 0 {
-		p.name = p.getName(nil)
-		p.dnstype = Type(p.getUint16(nil))
-		p.class = Class(p.getUint16(nil))
+		p.name = p.getName(nil, &err)
+		p.dnstype = Type(p.getUint16(nil, &err))
+		p.class = Class(p.getUint16(nil, &err))
 	}
 
 	if p.dh.ARCount > 0 {
 		nowpos := p.payloadpos
-		p.skipRRs(int(p.dh.ANCount + p.dh.NSCount + p.dh.ARCount - 1))
-		if p.getUint8(nil) == 0 && Type(p.getUint16(nil)) == OPT {
-			p.bufsize = p.getUint16(nil)
-			p.getUint8(nil)
-			p.ednsVersion = p.getUint8(nil)
+		p.skipRRs(int(p.dh.ANCount + p.dh.NSCount + p.dh.ARCount - 1), &err)
+		if p.getUint8(nil, &err) == 0 && Type(p.getUint16(nil, &err)) == OPT {
+			p.bufsize = p.getUint16(nil, &err)
+			p.getUint8(nil, &err)
+			p.ednsVersion = p.getUint8(nil, &err)
 			p.doBit = false
-			flags := p.getUint8(nil)
+			flags := p.getUint8(nil, &err)
 			if flags&0x80 != 0 {
 				p.doBit = true
 			}
-			p.getUint8(nil)
-			p.getUint16(nil)
+			p.getUint8(nil, &err)
+			p.getUint16(nil, &err)
 			p.haveEDNS = true
 		}
 		p.payloadpos = nowpos
@@ -339,14 +339,14 @@ func (p *PacketReader) Read(data []byte, length int) error {
 	return err
 }
 
-func (p *PacketReader) skipRRs(num int) {
+func (p *PacketReader) skipRRs(num int, err *error) {
 	for i := 0; i < num; i++ {
-		p.getName(nil)
+		p.getName(nil, err)
 		p.payloadpos += 8 // type, class , ttl
-		l := p.getUint16(nil)
+		l := p.getUint16(nil, err)
 		p.payloadpos += l
 		if p.payloadpos > uint16(len(p.payload)) {
-			// XXX handle error!
+			*err = io.ErrShortBuffer
 		}
 	}
 }
@@ -366,12 +366,15 @@ func (p *PacketReader) GetRR() (rrec *RRec) {
 
 	p.rrpos++
 
-	rrec.Name = *p.getName(nil)
-	rrec.Type = Type(p.getUint16(nil))
-	rrec.Class = Class(p.getUint16(nil))
-	rrec.TTL = p.getUint32(nil)
-	l := p.getUint16(nil)
-	//p.endofrecord = p.payloadpos + l
+	var err error
+	rrec.Name = *p.getName(nil, &err)
+	rrec.Type = Type(p.getUint16(nil, &err))
+	rrec.Class = Class(p.getUint16(nil, &err))
+	rrec.TTL = p.getUint32(nil, &err)
+	l := p.getUint16(nil, &err)
+	if err != nil {
+		return nil
+	}
 
 	var result RRGen
 	switch rrec.Type {
@@ -404,36 +407,52 @@ func (p *PacketReader) GetRR() (rrec *RRec) {
 	return rrec
 }
 
-func (p *PacketReader) getUint8(pos *uint16) uint8 {
+func (p *PacketReader) getUint8(pos *uint16, err *error) uint8 {
 	if pos == nil {
 		pos = &p.payloadpos
+	}
+	if int(*pos) + 1 > len(p.payload) {
+		*err = io.ErrShortBuffer
+		return 0
 	}
 	ret := p.payload[*pos]
 	*pos += 1
 	return ret
 }
 
-func (p *PacketReader) getUint16(pos *uint16) uint16 {
+func (p *PacketReader) getUint16(pos *uint16, err *error) uint16 {
 	if pos == nil {
 		pos = &p.payloadpos
+	}
+	if int(*pos) + 2 > len(p.payload) {
+		*err = io.ErrShortBuffer
+		return 0
 	}
 	ret := binary.BigEndian.Uint16(p.payload[*pos : *pos+2])
 	*pos += 2
 	return ret
 }
 
-func (p *PacketReader) getUint32(pos *uint16) uint32 {
+func (p *PacketReader) getUint32(pos *uint16, err *error) uint32 {
 	if pos == nil {
 		pos = &p.payloadpos
+	}
+	if int(*pos) + 4 > len(p.payload) {
+		*err = io.ErrShortBuffer
+		return 0
 	}
 	ret := binary.BigEndian.Uint32(p.payload[*pos : *pos+4])
 	*pos += 4
 	return ret
 }
 
-func (p *PacketReader) getBlob(size uint16, pos *uint16) []byte {
+func (p *PacketReader) getBlob(size uint16, pos *uint16, err *error) []byte {
 	if pos == nil {
 		pos = &p.payloadpos
+	}
+	if int(*pos) + int(size) > len(p.payload) {
+		*err = io.ErrShortBuffer
+		return nil
 	}
 	data := make([]byte, size)
 	copy(data, p.payload[*pos:*pos+size])
@@ -441,19 +460,19 @@ func (p *PacketReader) getBlob(size uint16, pos *uint16) []byte {
 	return data
 }
 
-func (p *PacketReader) getName(pos *uint16) *Name {
+func (p *PacketReader) getName(pos *uint16, err *error) *Name {
 	ret := new(Name)
 	if pos == nil {
 		pos = &p.payloadpos
 	}
 	for {
-		labellen := uint16(p.getUint8(pos))
+		labellen := uint16(p.getUint8(pos, err))
 		if labellen&0xc0 != 0 {
-			labellen2 := uint16(p.getUint8(pos))
+			labellen2 := uint16(p.getUint8(pos, err))
 			newpos := ((labellen &^ 0xc0) << 8) | labellen2
 			newpos -= HeaderLen
 			if newpos < *pos {
-				ret.Append(p.getName(&newpos))
+				ret.Append(p.getName(&newpos, err))
 				return ret
 			} else {
 				panic("forward compression")
@@ -462,7 +481,7 @@ func (p *PacketReader) getName(pos *uint16) *Name {
 		if labellen == 0 {
 			break
 		}
-		label := NewLabel(string(p.getBlob(labellen, pos))) // XXX string vs []byte
+		label := NewLabel(string(p.getBlob(labellen, pos, err))) // XXX string vs []byte
 		ret.PushBack(label)
 	}
 	return ret

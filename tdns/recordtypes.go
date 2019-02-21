@@ -30,11 +30,12 @@ type RRGen interface {
 }
 
 type UnknownGen struct {
+	Err error
 	Data []byte
 }
 
 func (a *UnknownGen) Gen(r *PacketReader, l uint16) {
-	a.Data = r.getBlob(l, nil)
+	a.Data = r.getBlob(l, nil, &a.Err)
 }
 
 func (a *UnknownGen) ToMessage(*MessageWriter) []byte {
@@ -46,11 +47,12 @@ func (a *UnknownGen) String() string {
 }
 
 type AGen struct {
+	Err error
 	IP net.IP
 }
 
 func (a *AGen) Gen(r *PacketReader, l uint16) {
-	data := r.getUint32(nil)
+	data := r.getUint32(nil, &a.Err)
 	a.IP = []byte{byte(data >> 24), byte(data >> 16), byte(data >> 8), byte(data)}
 }
 
@@ -63,11 +65,12 @@ func (a *AGen) String() string {
 }
 
 type AAAAGen struct {
+	Err error
 	IP net.IP
 }
 
 func (a *AAAAGen) Gen(r *PacketReader, l uint16) {
-	a.IP = r.getBlob(16, nil)
+	a.IP = r.getBlob(16, nil, &a.Err)
 }
 
 func (a *AAAAGen) ToMessage(*MessageWriter) []byte {
@@ -79,11 +82,12 @@ func (a *AAAAGen) String() string {
 }
 
 type NSGen struct {
+	Err error
 	NSName *Name
 }
 
 func (a *NSGen) Gen(r *PacketReader, l uint16) {
-	a.NSName = r.getName(nil)
+	a.NSName = r.getName(nil, &a.Err)
 }
 
 func (a *NSGen) ToMessage(w *MessageWriter) []byte {
@@ -97,11 +101,12 @@ func (a *NSGen) String() string {
 }
 
 type PTRGen struct {
+	Err error
 	PTR *Name
 }
 
 func (a *PTRGen) Gen(r *PacketReader, l uint16) {
-	a.PTR = r.getName(nil)
+	a.PTR = r.getName(nil, &a.Err)
 }
 
 func (a *PTRGen) ToMessage(w *MessageWriter) []byte {
@@ -116,11 +121,12 @@ func (a *PTRGen) String() string {
 
 
 type CNAMEGen struct {
+	Err error
 	CName *Name
 }
 
 func (a *CNAMEGen) Gen(r *PacketReader, l uint16) {
-	a.CName = r.getName(nil)
+	a.CName = r.getName(nil, &a.Err)
 }
 
 func (a *CNAMEGen) ToMessage(w *MessageWriter) []byte {
@@ -134,18 +140,19 @@ func (a *CNAMEGen) String() string {
 }
 
 type SOAGen struct {
+	Err error
 	MName, RName                            *Name
 	Serial, Refresh, Retry, Expire, Minimum uint32
 }
 
 func (s *SOAGen) Gen(r *PacketReader, l uint16) {
-	s.MName = r.getName(nil)
-	s.RName = r.getName(nil)
-	s.Serial = r.getUint32(nil)
-	s.Refresh = r.getUint32(nil)
-	s.Retry = r.getUint32(nil)
-	s.Expire = r.getUint32(nil)
-	s.Minimum = r.getUint32(nil)
+	s.MName = r.getName(nil, &s.Err)
+	s.RName = r.getName(nil, &s.Err)
+	s.Serial = r.getUint32(nil, &s.Err)
+	s.Refresh = r.getUint32(nil, &s.Err)
+	s.Retry = r.getUint32(nil, &s.Err)
+	s.Expire = r.getUint32(nil, &s.Err)
+	s.Minimum = r.getUint32(nil, &s.Err)
 
 }
 
@@ -166,13 +173,14 @@ func (s *SOAGen) String() string {
 }
 
 type MXGen struct {
+	Err error
 	Prio uint16
 	Name *Name
 }
 
 func (m *MXGen) Gen(r *PacketReader, l uint16) {
-	m.Prio = r.getUint16(nil)
-	m.Name = r.getName(nil)
+	m.Prio = r.getUint16(nil, &m.Err)
+	m.Name = r.getName(nil, &m.Err)
 }
 
 func (m *MXGen) ToMessage(w *MessageWriter) []byte {
@@ -187,6 +195,7 @@ func (m *MXGen) String() string {
 }
 
 type DNSKEYGen struct {
+	Err       error
 	Flags     Flags
 	Protocol  Protocol
 	Algorithm Algorithm
@@ -196,10 +205,10 @@ type DNSKEYGen struct {
 // drijf.net.              172641  IN      DNSKEY  257 3 13 sRZY2pRVWIlF3fgbeFEdC1RkM9g26LwCEIT5Ti7hvNIDcyzvKb6Fo+Oz 8uqZQG5XxXStXdOiFU2tTewX/7eorg==
 
 func (k *DNSKEYGen) Gen(r *PacketReader, l uint16) {
-	k.Flags = Flags(r.getUint16(nil))
-	k.Protocol = Protocol(r.getUint8(nil))
-	k.Algorithm = Algorithm(r.getUint8(nil))
-	k.PubKey = r.getBlob(l-4, nil)
+	k.Flags = Flags(r.getUint16(nil, &k.Err))
+	k.Protocol = Protocol(r.getUint8(nil, &k.Err))
+	k.Algorithm = Algorithm(r.getUint8(nil, &k.Err))
+	k.PubKey = r.getBlob(l-4, nil, &k.Err)
 }
 
 func (k *DNSKEYGen) ToMessage(*MessageWriter) []byte {
@@ -217,6 +226,7 @@ func (k *DNSKEYGen) String() string {
 }
 
 type DSGen struct {
+	Err	   error
 	KeyTag     KeyTag
 	Algorithm  Algorithm
 	DigestType DigestType
@@ -224,10 +234,10 @@ type DSGen struct {
 }
 
 func (d *DSGen) Gen(r *PacketReader, l uint16) {
-	d.KeyTag = KeyTag(r.getUint16(nil))
-	d.Algorithm = Algorithm(r.getUint8(nil))
-	d.DigestType = DigestType(r.getUint8(nil))
-	d.Digest = r.getBlob(l-4, nil)
+	d.KeyTag = KeyTag(r.getUint16(nil, &d.Err))
+	d.Algorithm = Algorithm(r.getUint8(nil, &d.Err))
+	d.DigestType = DigestType(r.getUint8(nil, &d.Err))
+	d.Digest = r.getBlob(l-4, nil, &d.Err)
 }
 
 func (d *DSGen) ToMessage(w *MessageWriter) []byte {
@@ -245,6 +255,7 @@ func (d *DSGen) String() string {
 }
 
 type RRSIGGen struct {
+	Err	   error
 	Type       Type
 	Algorithm  Algorithm
 	Labels     uint8
@@ -258,16 +269,16 @@ type RRSIGGen struct {
 
 func (rr *RRSIGGen) Gen(r *PacketReader, l uint16) {
 	p1 := r.payloadpos
-	rr.Type = Type(r.getUint16(nil))
-	rr.Algorithm = Algorithm(r.getUint8(nil))
-	rr.Labels = r.getUint8(nil)
-	rr.TTL = r.getUint32(nil)
-	rr.Expiration = Time(r.getUint32(nil))
-	rr.Inception = Time(r.getUint32(nil))
-	rr.KeyTag = KeyTag(r.getUint16(nil))
-	rr.Signer = r.getName(nil)
+	rr.Type = Type(r.getUint16(nil, &rr.Err))
+	rr.Algorithm = Algorithm(r.getUint8(nil, &rr.Err))
+	rr.Labels = r.getUint8(nil, &rr.Err)
+	rr.TTL = r.getUint32(nil, &rr.Err)
+	rr.Expiration = Time(r.getUint32(nil, &rr.Err))
+	rr.Inception = Time(r.getUint32(nil, &rr.Err))
+	rr.KeyTag = KeyTag(r.getUint16(nil, &rr.Err))
+	rr.Signer = r.getName(nil, &rr.Err)
 	x := l - (r.payloadpos - p1)
-	rr.Signature = r.getBlob(x, nil)
+	rr.Signature = r.getBlob(x, nil, &rr.Err)
 }
 
 func (r *RRSIGGen) ToMessage(w *MessageWriter) []byte {

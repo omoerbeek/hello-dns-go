@@ -181,13 +181,20 @@ func (resolver *DNSResolver) sendTCPQuery(nsip net.IP, writer *tdns.MessageWrite
 		return
 	}
 	data := make([]byte, l)
-	var n int
-	// RFC 2308 talks about 120 seconds, I suppose that is not workable...
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if n, err = conn.Read(data); err != nil {
-		return
+	read := 0
+	for count := 0; count < 3 && read < int(l); count++ {
+		// RFC 2308 talks about 120 seconds, I suppose that is not workable...
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var n int
+		if n, err = conn.Read(data[read:]); err != nil {
+			return
+		}
+		read += n
 	}
-	reader, err = tdns.NewMessagReader(data, n)
+	if read < int(l) {
+		return nil, fmt.Errorf("read timeout")
+	}
+	reader, err = tdns.NewMessagReader(data, read)
 	return
 }
 
@@ -243,7 +250,7 @@ func (resolver *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstyp
 		writer := tdns.NewMessageWriter(name, dnstype, tdns.IN, math.MaxUint16)
 
 		if doEDNS {
-			writer.SetEDNS(resolver.DNSBufSize, false, tdns.Noerror)
+			writer.SetEDNS(resolver.DNSBufSize, true, tdns.Noerror)
 		}
 
 		// Use a good random source out of principle

@@ -219,7 +219,7 @@ type (
 	cacheHeader struct {
 		dh           Header
 		timestamp    time.Time
-		cacheEntries map[int]*RRec
+		cacheEntries []*RRec
 	}
 
 	RRCache struct {
@@ -267,14 +267,14 @@ func (c *RRCache) Put(m MessageReaderInterface) {
 	c.mutex.Lock()
 	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
-		c.rr[k1] = &cacheHeader{cacheEntries: make(map[int]*RRec)}
+		c.rr[k1] = &cacheHeader{cacheEntries: make([]*RRec, 0)}
 	}
 	m.Reset()
 	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
 		c.rr[k1].dh = *m.DH()
 		c.rr[k1].timestamp = t
-		c.rr[k1].cacheEntries[len(c.rr[k1].cacheEntries)] = rrec
+		c.rr[k1].cacheEntries = append(c.rr[k1].cacheEntries, rrec)
 	}
 	c.mutex.Unlock()
 	m.Reset()
@@ -417,11 +417,15 @@ func (c *RRCache) cleanup() {
 	c.mutex.Lock()
 	now := time.Now()
 	for key, cachentries := range c.rr {
+		outer:
 		for n, cachentry := range cachentries.cacheEntries {
 			//fmt.Println(cachentry.String())
 			newttl := computeTTL(now, cachentries.timestamp, cachentry.TTL)
 			if newttl < 1 {
-				delete(cachentries.cacheEntries, n)
+				i := len(cachentries.cacheEntries) - 1
+				cachentries.cacheEntries[n] = cachentries.cacheEntries[i]
+				cachentries.cacheEntries = cachentries.cacheEntries[:i]
+				break outer
 			}
 		}
 		if len(cachentries.cacheEntries) == 0 {
