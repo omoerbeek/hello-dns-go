@@ -404,6 +404,11 @@ func (c *RRCache) GetRRSet(name *Name, dnstype Type) MessageReaderInterface {
 	return nil
 }
 
+func (c *cacheReader) FirstRR() (rrec *RRec) {
+	c.Reset()
+	return c.GetRR()
+}
+
 func (c *cacheReader) GetRR() (rrec *RRec) {
 	if c.pos >= len(c.rr) {
 		return nil
@@ -417,7 +422,7 @@ func (c *RRCache) cleanup() {
 	c.mutex.Lock()
 	now := time.Now()
 	for key, cachentries := range c.rr {
-		outer:
+	outer:
 		for n, cachentry := range cachentries.cacheEntries {
 			//fmt.Println(cachentry.String())
 			newttl := computeTTL(now, cachentries.timestamp, cachentry.TTL)

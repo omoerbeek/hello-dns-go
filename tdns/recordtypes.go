@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"sort"
 )
 
 type RRGen interface {
@@ -30,7 +31,7 @@ type RRGen interface {
 }
 
 type UnknownGen struct {
-	Err error
+	Err  error
 	Data []byte
 }
 
@@ -48,7 +49,7 @@ func (a *UnknownGen) String() string {
 
 type AGen struct {
 	Err error
-	IP net.IP
+	IP  net.IP
 }
 
 func (a *AGen) Gen(r *PacketReader, l uint16) {
@@ -66,7 +67,7 @@ func (a *AGen) String() string {
 
 type AAAAGen struct {
 	Err error
-	IP net.IP
+	IP  net.IP
 }
 
 func (a *AAAAGen) Gen(r *PacketReader, l uint16) {
@@ -82,7 +83,7 @@ func (a *AAAAGen) String() string {
 }
 
 type NSGen struct {
-	Err error
+	Err    error
 	NSName *Name
 }
 
@@ -119,9 +120,8 @@ func (a *PTRGen) String() string {
 	return a.PTR.String()
 }
 
-
 type CNAMEGen struct {
-	Err error
+	Err   error
 	CName *Name
 }
 
@@ -140,7 +140,7 @@ func (a *CNAMEGen) String() string {
 }
 
 type SOAGen struct {
-	Err error
+	Err                                     error
 	MName, RName                            *Name
 	Serial, Refresh, Retry, Expire, Minimum uint32
 }
@@ -173,7 +173,7 @@ func (s *SOAGen) String() string {
 }
 
 type MXGen struct {
-	Err error
+	Err  error
 	Prio uint16
 	Name *Name
 }
@@ -226,7 +226,7 @@ func (k *DNSKEYGen) String() string {
 }
 
 type DSGen struct {
-	Err	   error
+	Err        error
 	KeyTag     KeyTag
 	Algorithm  Algorithm
 	DigestType DigestType
@@ -255,7 +255,7 @@ func (d *DSGen) String() string {
 }
 
 type RRSIGGen struct {
-	Err	   error
+	Err        error
 	Type       Type
 	Algorithm  Algorithm
 	Labels     uint8
@@ -292,6 +292,48 @@ func (r *RRSIGGen) ToMessage(w *MessageWriter) []byte {
 	XfrUInt16(&buf, uint16(r.KeyTag))
 	w.XfrName(&buf, r.Signer, false)
 	XfrBlob(&buf, r.Signature)
+	return buf.Bytes()
+}
+
+type ByData struct {
+	w MessageWriter
+	r []RRec
+}
+
+func (a ByData) Len() int      { return len(a.r) }
+func (a ByData) Swap(i, j int) { a.r[i], a.r[j] = a.r[j], a.r[i] }
+func (a ByData) Less(i, j int) bool {
+	d1 := a.r[i].Data.ToMessage(&a.w)
+	d2 := a.r[j].Data.ToMessage(&a.w)
+	return bytes.Compare(d1, d2) < 0
+}
+
+func (r *RRSIGGen) ToRDATA(recs []*RRec) []byte {
+	var buf bytes.Buffer
+	XfrUInt16(&buf, uint16(r.Type))
+	XfrUInt8(&buf, uint8(r.Algorithm))
+	XfrUInt8(&buf, uint8(r.Labels))
+	XfrUInt32(&buf, r.TTL)
+	XfrUInt32(&buf, uint32(r.Expiration))
+	XfrUInt32(&buf, uint32(r.Inception))
+	XfrUInt16(&buf, uint16(r.KeyTag))
+	w := MessageWriter{}
+	w.Compress = false
+	w.XfrName(&buf, r.Signer, false)
+	var cpy []RRec
+	for _, rec := range recs {
+		cpy = append(cpy, *rec) // XXX Canonical version!
+	}
+	sort.Sort(ByData{w, cpy})
+	for _, rec := range cpy {
+		w.XfrName(&buf, &rec.Name, false)
+		XfrUInt16(&buf, uint16(rec.Type))
+		XfrUInt16(&buf, uint16(rec.Class))
+		XfrUInt32(&buf, rec.TTL) // XXX ORIG TL!
+		rawbytes := rec.Data.ToMessage(&w)
+		XfrUInt16(&buf, uint16(len(rawbytes)))
+		XfrBlob(&buf, rawbytes)
+	}
 	return buf.Bytes()
 }
 

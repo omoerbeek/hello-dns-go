@@ -21,6 +21,7 @@ import (
 	"container/list"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type (
@@ -466,4 +467,12 @@ func (r RCode) String() string {
 
 func (t Time) String() string {
 	return fmt.Sprintf("%d", t)
+}
+
+func TimeFromHumanReadbale(h string) Time {
+	t, err := time.Parse("20060102150405", h)
+	if err != nil {
+		return 0
+	}
+	return Time(t.Unix())
 }

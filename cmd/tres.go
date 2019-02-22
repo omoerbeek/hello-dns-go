@@ -398,31 +398,10 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
-		if dnstype == tdns.DNSKEY {
-			var dsrecords []*tdns.RRec
-			if name.Empty() {
-				dsrecords = tdns.TrustAnchor
-			} else {
-				//parent := name.Parent()
-				var ds tdns.ResolveResult
-				ds, err = resolver.resolveAt(name, tdns.DS, depth+1, tdns.MakeName("."), &roots)
-				if err == nil {
-					dsrecords = ds.Answers
-				} else {
-					return
-				}
-			}
-			resolver.log("Going to validate DNSKEY for %s with %v", name, dsrecords)
-			err = tdns.Validate(reader, dsrecords)
-			resolver.log("Validate %s returned %v", name, err)
-			if err != nil {
-				return
-			}
-		}
 		// XXX Cache poisoning!
 		rrCache.Put(reader)
 
-		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+		for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
 
 			resolver.log("RR(%s): %s", rrec.Section, rrec)
 
@@ -578,18 +557,172 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 	return
 }
 
-func resolveHints() {
+/*
+func x() {
+	if dnstype == tdns.DNSKEY {
+		var dsrecords []*tdns.RRec
+		if name.Empty() {
+			dsrecords = tdns.TrustAnchor
+		} else {
+			//parent := name.Parent()
+			var ds tdns.ResolveResult
+			ds, err = resolver.resolveAt(name, tdns.DS, depth+1, tdns.MakeName("."), &roots)
+			if err == nil {
+				dsrecords = ds.Answers
+			} else {
+				return
+			}
+		}
+		resolver.log("Going to validate DNSKEY for %s with %v", name, dsrecords)
+		var validated bool
+		err = tdns.Validate(reader, dsrecords, &validated)
+		resolver.log("Validate %s returned %v", name, err)
+		if err != nil {
+			return
+		}
+	}
+}
+*/
+
+func (resolver *DNSResolver) ValidateRRSet(dnstype tdns.Type, zonekeys []*tdns.RRec, rrset, rrsigs []*tdns.RRec) error {
+
+	resolver.log("Checking %d %s %d RRSIGs", len(rrset), dnstype.String(), len(rrsigs))
+
+	for _, rec := range rrsigs {
+		resolver.log("Checking %s", rec)
+		found := rec.Data.(*tdns.RRSIGGen)
+		if found.Type != dnstype {
+			resolver.log("type mismtatch")
+			//resolver.ValidateRRSIG(dnstype, rrsig)
+			continue
+		}
+		for _, dnskey := range zonekeys {
+			keydata := dnskey.Data.(*tdns.DNSKEYGen)
+			if keydata.Flags&tdns.ZONE == 0 {
+				resolver.log("no zone key")
+				continue
+			}
+			if keydata.Flags&tdns.REVOKE != 0 {
+				resolver.log("revoked key")
+				continue
+			}
+			if keydata.Algorithm != found.Algorithm {
+				resolver.log("algorithm mismatch")
+				continue
+			}
+			if keydata.KeyTag() != found.KeyTag {
+				resolver.log("keytag mismatch %d %d", keydata.KeyTag(), found.KeyTag)
+				continue
+			}
+			if !dnskey.Name.Equals(found.Signer) {
+				resolver.log("signer mismatch")
+				continue
+			}
+			resolver.log("FOUND MATCHING DNSKEY %s FOR RRSIG %s", dnskey, found)
+			err := tdns.ValidateRSA(rrset, keydata, rec)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+
+	}
+	return fmt.Errorf("no matching DNSKEY found")
+}
+
+func (resolver *DNSResolver) ValidateRoot(zonekeys []*tdns.RRec, reader tdns.MessageReaderInterface) error {
+	// First take a look at the answers only
+
+	split := make(map[tdns.Type][]*tdns.RRec)
+	for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
+		if rrec.Section == tdns.Answer {
+			split[rrec.Type] = append(split[rrec.Type], rrec)
+		}
+	}
+	rrsigs := split[tdns.RRSIG]
+	for dnstype, recs := range split {
+		if dnstype == tdns.RRSIG {
+			continue
+		}
+		if err := resolver.ValidateRRSet(dnstype, zonekeys, recs, rrsigs); err != nil {
+			return err
+		} else {
+			return nil
+		}
+
+	}
+	return fmt.Errorf("no validation took place")
+}
+
+func resolveRootHints() {
 	// We do not explicitly randomize this map, since golang already
 	// does this.
-	empty := DNSResolver{DNSBufSize: 4000}
+	res := DNSResolver{DNSBufSize: 4000}
+	root := tdns.MakeName(".")
+	var rootkey *tdns.RRec
+	var allrootkeys []*tdns.RRec
+	var reader tdns.MessageReaderInterface
+	var err error
+
+outer:
 	for name, ip := range hints {
-		fmt.Println("Using hint", ip)
-		reader, err := empty.getResponse(tdns.NameIP{Name: name, IP: ip}, tdns.MakeName("."), tdns.NS)
+		fmt.Println("Using hint for DNSKEY", ip)
+		nameip := tdns.NameIP{Name: name, IP: ip}
+
+		reader, err = res.getResponse(nameip, root, tdns.DNSKEY)
 		if err != nil {
 			continue
 		}
-		var rrec *tdns.RRec
-		for rrec = reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+		for rrec := reader.GetRR(); rrec != nil; rrec = reader.GetRR() {
+			switch a := rrec.Data.(type) {
+			case *tdns.DNSKEYGen:
+				err := tdns.ValidateDNSKeyWithDS(root, a, tdns.TrustAnchor)
+				if err == nil {
+					rootkey = rrec
+					res.log("Valid root DNSKEY found keytag is %d", a.KeyTag())
+					res.log("%s", rootkey)
+					break outer
+				} else {
+					res.log("Invalid rootkey: %s, trying next", err)
+				}
+			}
+		}
+	}
+	if rootkey == nil {
+		panic("No valid rootkey found")
+	}
+
+	for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
+		switch rrec.Data.(type) {
+		case *tdns.DNSKEYGen:
+			allrootkeys = append(allrootkeys, rrec)
+		}
+	}
+	res.log("\nFound %d DNSKEY records", len(allrootkeys))
+
+	zonekeys := []*tdns.RRec{rootkey}
+
+	if err := res.ValidateRoot(zonekeys, reader); err != nil {
+		panic(fmt.Sprint("validation of root DNSKEYS failed: ", err))
+	} else {
+		res.log("root DNSKEY validation OK")
+	}
+
+	for name, ip := range hints {
+		fmt.Println("Using hint for . NS servers", ip)
+		nameip := tdns.NameIP{Name: name, IP: ip}
+		reader, err := res.getResponse(nameip, root, tdns.NS)
+		if err != nil {
+			continue
+		}
+		res.log("Validating hints")
+		if err = res.ValidateRoot(allrootkeys, reader); err != nil {
+			res.log("Validation failed: %s", err)
+			continue
+		} else {
+			res.log("Good validation of root NS records")
+		}
+		for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
 			switch a := rrec.Data.(type) {
 			case *tdns.AGen:
 				roots.Add(&rrec.Name, a.IP)
@@ -602,6 +735,9 @@ func resolveHints() {
 			break
 		}
 
+	}
+	if len(roots.Map) == 0 {
+		panic("could not resolve root hints")
 	}
 }
 
@@ -702,7 +838,7 @@ func main() {
 	go negResultCache.RunNeg()
 	go rrCache.Run()
 
-	resolveHints()
+	resolveRootHints()
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
 
 	if len(args) == 2 {

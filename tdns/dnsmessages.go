@@ -42,7 +42,7 @@ type (
 
 func (r *RRec) String() string {
 	extra := ""
-	if r.Type == DNSKEY {
+	if false && r.Type == DNSKEY {
 		rec := r.Data.(*DNSKEYGen)
 		sha1 := rec.Digest(&r.Name, SHA1)
 		sha256 := rec.Digest(&r.Name, SHA256)
@@ -69,6 +69,7 @@ func XfrBlob(b *bytes.Buffer, data []byte) {
 
 type MessageWriter struct {
 	DH       Header
+	Compress bool
 	name     Name
 	dnstype  Type
 	class    Class
@@ -83,6 +84,7 @@ type MessageWriter struct {
 func NewMessageWriter(name *Name, dnstype Type, class Class, maxsize int) *MessageWriter {
 	r := new(MessageWriter)
 	r.payload = new(bytes.Buffer)
+	r.Compress = true
 	r.maxsize = maxsize - HeaderLen
 	r.payload.Grow(r.maxsize)
 	r.name = *name
@@ -104,7 +106,7 @@ func (w *MessageWriter) resetRRs() {
 func (w *MessageWriter) XfrName(b *bytes.Buffer, name *Name, compress bool) {
 
 	for e := name.Name.Front(); e != nil; e = e.Next() {
-		if compress {
+		if w.Compress && compress {
 			tname := NewNameFromTail(e)
 			pos, ok := w.namemap[tname.K()]
 			if ok {
@@ -126,9 +128,6 @@ func (w *MessageWriter) XfrName(b *bytes.Buffer, name *Name, compress bool) {
 		XfrBlob(b, l.Label)
 	}
 	XfrUInt8(b, uint8(0))
-	if compress {
-		//fmt.Printf("%s map is %v\n", name.String(), w.namemap)
-	}
 }
 
 func (w *MessageWriter) bytes() []byte {
@@ -224,6 +223,7 @@ func (w *MessageWriter) PutRR(s Section, name *Name, dnstype Type, ttl uint32, c
 
 type MessageReaderInterface interface {
 	Reset()
+	FirstRR() (rrec *RRec)
 	GetRR() (rrec *RRec)
 	DH() *Header
 	Name() *Name
@@ -320,7 +320,7 @@ func (p *PacketReader) Read(data []byte, length int) error {
 
 	if p.dh.ARCount > 0 {
 		nowpos := p.payloadpos
-		p.skipRRs(int(p.dh.ANCount + p.dh.NSCount + p.dh.ARCount - 1), &err)
+		p.skipRRs(int(p.dh.ANCount+p.dh.NSCount+p.dh.ARCount-1), &err)
 		if p.getUint8(nil, &err) == 0 && Type(p.getUint16(nil, &err)) == OPT {
 			p.bufsize = p.getUint16(nil, &err)
 			p.getUint8(nil, &err)
@@ -349,6 +349,11 @@ func (p *PacketReader) skipRRs(num int, err *error) {
 			*err = io.ErrShortBuffer
 		}
 	}
+}
+
+func (p *PacketReader) FirstRR() (rrec *RRec) {
+	p.Reset()
+	return p.GetRR()
 }
 
 func (p *PacketReader) GetRR() (rrec *RRec) {
@@ -411,7 +416,7 @@ func (p *PacketReader) getUint8(pos *uint16, err *error) uint8 {
 	if pos == nil {
 		pos = &p.payloadpos
 	}
-	if int(*pos) + 1 > len(p.payload) {
+	if int(*pos)+1 > len(p.payload) {
 		*err = io.ErrShortBuffer
 		return 0
 	}
@@ -424,7 +429,7 @@ func (p *PacketReader) getUint16(pos *uint16, err *error) uint16 {
 	if pos == nil {
 		pos = &p.payloadpos
 	}
-	if int(*pos) + 2 > len(p.payload) {
+	if int(*pos)+2 > len(p.payload) {
 		*err = io.ErrShortBuffer
 		return 0
 	}
@@ -437,7 +442,7 @@ func (p *PacketReader) getUint32(pos *uint16, err *error) uint32 {
 	if pos == nil {
 		pos = &p.payloadpos
 	}
-	if int(*pos) + 4 > len(p.payload) {
+	if int(*pos)+4 > len(p.payload) {
 		*err = io.ErrShortBuffer
 		return 0
 	}
@@ -450,7 +455,7 @@ func (p *PacketReader) getBlob(size uint16, pos *uint16, err *error) []byte {
 	if pos == nil {
 		pos = &p.payloadpos
 	}
-	if int(*pos) + int(size) > len(p.payload) {
+	if int(*pos)+int(size) > len(p.payload) {
 		*err = io.ErrShortBuffer
 		return nil
 	}

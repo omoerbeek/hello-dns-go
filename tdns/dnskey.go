@@ -18,12 +18,15 @@ package tdns
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"math/big"
 )
 
 const (
@@ -32,6 +35,10 @@ const (
 	ZONE   Flags = 1 << (15 - 7)
 	REVOKE       = 1 << (15 - 8)
 	SEP          = 1 << (15 - 15)
+
+	RSASHA1	= 5
+	RSASHA256 = 8
+	RSASHA512 = 10
 )
 
 /*
@@ -73,32 +80,17 @@ func init() {
 	}
 }
 
-func Validate(m MessageReaderInterface, dsrecords []*RRec) error {
-	// Group & sort etc
-	// For now, only DS check for DNSKEY records
-	var err error
 
-	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
-		switch rrec.Type {
-		case DNSKEY:
-			err = ValidateDNSKey(&rrec.Name, rrec.Data.(*DNSKEYGen), dsrecords)
-		}
-
-		if err != nil {
-			break
-		}
-	}
-	m.Reset()
-	return err
-}
-
-func ValidateDNSKey(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
+func ValidateDNSKeyWithDS(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
 
 	keyTag := dnskey.KeyTag()
 	flags := dnskey.Flags
 
 	if flags&REVOKE != 0 {
-		return nil // revoked
+		return fmt.Errorf("dnskey revoked")
+	}
+	if flags&ZONE == 0 {
+		return fmt.Errorf("dnskey not a zone key")
 	}
 	ok := false
 	for _, rec := range dsrecords {
@@ -131,7 +123,7 @@ func ValidateDNSKey(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
 	if flags&SEP == 0 {
 		// IF it is not a SEP, no DS validation is needed, but it *should* be signed by a ZSK...
 		// Need to check against RFC!
-		return nil
+		return fmt.Errorf("no matching digest for non-SEP key")
 	}
 	return fmt.Errorf("no matching digest found")
 }
@@ -193,4 +185,32 @@ func (k *DNSKEYGen) KeyTag() KeyTag {
 	}
 	ac += (ac >> 16) & 0xffff
 	return KeyTag(ac)
+}
+
+func ValidateRSA(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
+	ee := big.NewInt(0)
+	ee.SetBytes(key.PubKey[1:key.PubKey[0]+1]) // XXX Validation!
+	e := int(ee.Int64())
+	pubkeyData := key.PubKey[key.PubKey[0]+1:]
+	mod := big.NewInt(0)
+	mod = mod.SetBytes(pubkeyData)
+	pubkey := rsa.PublicKey{ N : mod, E: e}
+	buf := rrsig.Data.(*RRSIGGen).ToRDATA(rrset)
+
+	var f hash.Hash
+	var h crypto.Hash
+	switch key.Algorithm {
+	case RSASHA256:
+		f = sha256.New()
+		h = crypto.SHA256
+	case RSASHA512:
+		f = sha512.New()
+		h = crypto.SHA512
+	default:
+		return fmt.Errorf("NYI")
+	}
+
+	f.Write(buf)
+	sum := f.Sum(nil)
+	return rsa.VerifyPKCS1v15(&pubkey, h, sum, rrsig.Data.(*RRSIGGen).Signature)
 }
