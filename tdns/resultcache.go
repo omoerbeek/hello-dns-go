@@ -269,8 +269,7 @@ func (c *RRCache) Put(m MessageReaderInterface) {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
 		c.rr[k1] = &cacheHeader{cacheEntries: make([]*RRec, 0)}
 	}
-	m.Reset()
-	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
+	for rrec := m.FirstRR(); rrec != nil; rrec = m.GetRR() {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
 		c.rr[k1].dh = *m.DH()
 		c.rr[k1].timestamp = t

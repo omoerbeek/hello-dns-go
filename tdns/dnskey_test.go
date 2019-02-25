@@ -64,7 +64,7 @@ func TestValidateRSA256(t *testing.T) {
 		KeyTag: 9033, Signer: MakeName("example.net"), Signature: s}
 	rrsigRR := RRec{Name: *MakeName("www.example.net"), Type:RRSIG, Class:IN, TTL:3600, Data:&rrsig}
 
-	if err := ValidateRSA([]*RRec{ &aRR }, &dnskey, &rrsigRR); err != nil {
+	if err := ValidateSignature([]*RRec{&aRR }, &dnskey, &rrsigRR); err != nil {
 		t.Error(err)
 	}
 
@@ -143,7 +143,7 @@ func TestValidateRSA512(t *testing.T) {
 		KeyTag: 3740, Signer: MakeName("example.net"), Signature: s}
 	rrsigRR := RRec{Name: *MakeName("www.example.net"), Type:RRSIG, Class:IN, TTL:3600, Data:&rrsig}
 
-	if err := ValidateRSA([]*RRec{ &aRR }, &dnskey, &rrsigRR); err != nil {
+	if err := ValidateSignature([]*RRec{&aRR }, &dnskey, &rrsigRR); err != nil {
 		t.Error(err)
 	}
 

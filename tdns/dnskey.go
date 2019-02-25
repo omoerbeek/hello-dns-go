@@ -19,6 +19,8 @@ package tdns
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -36,9 +38,10 @@ const (
 	REVOKE       = 1 << (15 - 8)
 	SEP          = 1 << (15 - 15)
 
-	RSASHA1	= 5
-	RSASHA256 = 8
-	RSASHA512 = 10
+	RSASHA1         = 5
+	RSASHA256       = 8
+	RSASHA512       = 10
+	ECDSAP256SHA256 = 13
 )
 
 /*
@@ -80,7 +83,6 @@ func init() {
 	}
 }
 
-
 func ValidateDNSKeyWithDS(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) error {
 
 	keyTag := dnskey.KeyTag()
@@ -94,9 +96,9 @@ func ValidateDNSKeyWithDS(name *Name, dnskey *DNSKEYGen, dsrecords []*RRec) erro
 	}
 	ok := false
 	for _, rec := range dsrecords {
-		ds := rec.Data.(*DSGen)
+		ds, _ := rec.Data.(*DSGen)
 		if ds == nil {
-			panic("ds data is nil")
+			continue
 		}
 		if ds.KeyTag != keyTag {
 			continue
@@ -187,34 +189,58 @@ func (k *DNSKEYGen) KeyTag() KeyTag {
 	return KeyTag(ac)
 }
 
-func ValidateRSA(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
+func ValidateSignature(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
 	var f hash.Hash
 	var h crypto.Hash
+	var el bool
 	switch key.Algorithm {
 	case RSASHA1:
 		f = sha1.New()
 		h = crypto.SHA1
+		el = false
 	case RSASHA256:
 		f = sha256.New()
 		h = crypto.SHA256
+		el = false
 	case RSASHA512:
 		f = sha512.New()
 		h = crypto.SHA512
+		el = false
+	case ECDSAP256SHA256:
+		f = sha256.New()
+		el = true
+
 	default:
 		return fmt.Errorf("NYI")
 	}
 
-	ee := big.NewInt(0)
-	ee.SetBytes(key.PubKey[1:key.PubKey[0]+1]) // XXX Validation!
-	e := int(ee.Int64())
-	pubkeyData := key.PubKey[key.PubKey[0]+1:]
-	mod := big.NewInt(0)
-	mod = mod.SetBytes(pubkeyData)
-	pubkey := rsa.PublicKey{ N: mod, E: e}
 	buf := rrsig.Data.(*RRSIGGen).ToRDATA(rrset)
-
-
 	f.Write(buf)
 	sum := f.Sum(nil)
-	return rsa.VerifyPKCS1v15(&pubkey, h, sum, rrsig.Data.(*RRSIGGen).Signature)
+
+	if !el {
+		// XXX Below are mostly educated guesses on the encoding of the pubkey and signature
+		// Should check against RFC etc
+		var e, mod big.Int
+		e.SetBytes(key.PubKey[1 : key.PubKey[0]+1]) // XXX Bounds checking!
+		mod.SetBytes(key.PubKey[key.PubKey[0]+1:])
+		pubkey := rsa.PublicKey{N: &mod, E: int(e.Int64())}
+		return rsa.VerifyPKCS1v15(&pubkey, h, sum, rrsig.Data.(*RRSIGGen).Signature)
+	} else {
+		// XXX Below are mostly educated guesses on the encoding of the pubkey and signature
+		// Should check against RFC etc
+		var x, y, r, s big.Int
+		l := len(key.PubKey)
+		x.SetBytes(key.PubKey[0 : l/2])
+		y.SetBytes(key.PubKey[l/2:])
+		pubkey := ecdsa.PublicKey{Curve: elliptic.P256(), X: &x, Y: &y}
+		sigdata := rrsig.Data.(*RRSIGGen).Signature
+		r.SetBytes(sigdata[0:32]) // XXX Bounds checking!
+		s.SetBytes(sigdata[32:])
+
+		if ecdsa.Verify(&pubkey, sum, &r, &s) {
+			return nil
+		}
+		return fmt.Errorf("ecdsa validation error")
+	}
 }
