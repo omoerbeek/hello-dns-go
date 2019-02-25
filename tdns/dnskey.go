@@ -194,7 +194,7 @@ func ValidateRSA(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
 	pubkeyData := key.PubKey[key.PubKey[0]+1:]
 	mod := big.NewInt(0)
 	mod = mod.SetBytes(pubkeyData)
-	pubkey := rsa.PublicKey{ N : mod, E: e}
+	pubkey := rsa.PublicKey{ N: mod, E: e}
 	buf := rrsig.Data.(*RRSIGGen).ToRDATA(rrset)
 
 	var f hash.Hash

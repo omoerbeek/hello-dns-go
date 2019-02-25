@@ -398,6 +398,15 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
+		if !reader.FromCache() {
+			valerr := resolver.Validate(name, reader)
+			if valerr != nil {
+				resolver.log("Validate failed: %s", err)
+			} else {
+				resolver.log("GOOD VALIDATION!")
+			}
+		}
+
 		// XXX Cache poisoning!
 		rrCache.Put(reader)
 
@@ -584,6 +593,49 @@ func x() {
 }
 */
 
+func (resolver *DNSResolver) Validate(name *tdns.Name, reader tdns.MessageReaderInterface) error {
+	var dsrecords []*tdns.RRec
+	var err error
+	if name.Empty() {
+		dsrecords = tdns.TrustAnchor
+	} else {
+		parent := name.Parent()
+		ds, err := resolver.resolveAt(parent, tdns.DS, 0, tdns.MakeName("."), &roots)
+		if err == nil {
+			dsrecords = ds.Answers
+		} else {
+			return fmt.Errorf("no DS records in parent")
+		}
+	}
+
+	var res tdns.ResolveResult
+	res, err = resolver.resolveAt(name, tdns.DNSKEY, 0, tdns.MakeName("."), &roots)
+	if err != nil {
+		return err
+	}
+	var ksk *tdns.RRec
+	outer:
+	for _, rrec := range res.Answers {
+		switch a := rrec.Data.(type) {
+		case *tdns.DNSKEYGen:
+			err := tdns.ValidateDNSKeyWithDS(name, a, dsrecords)
+			if err == nil {
+				ksk = rrec
+				resolver.log("Valid ksk DNSKEY found keytag is %d", a.KeyTag())
+				resolver.log("%s", ksk)
+				break outer
+			} else {
+				resolver.log("Invalid ksk: %s, trying next", err)
+			}
+		}
+	}
+	if ksk == nil {
+		return fmt.Errorf("no ksk valid found")
+	}
+	return nil
+}
+
+
 func (resolver *DNSResolver) ValidateRRSet(dnstype tdns.Type, zonekeys []*tdns.RRec, rrset, rrsigs []*tdns.RRec) error {
 
 	resolver.log("Checking %d %s %d RRSIGs", len(rrset), dnstype.String(), len(rrsigs))
@@ -630,9 +682,8 @@ func (resolver *DNSResolver) ValidateRRSet(dnstype tdns.Type, zonekeys []*tdns.R
 	return fmt.Errorf("no matching DNSKEY found")
 }
 
-func (resolver *DNSResolver) ValidateRoot(zonekeys []*tdns.RRec, reader tdns.MessageReaderInterface) error {
-	// First take a look at the answers only
-
+func (resolver *DNSResolver) ValidateAllRRSets(zonekeys []*tdns.RRec, reader tdns.MessageReaderInterface) error {
+	// For the moment take a look at the answers only
 	split := make(map[tdns.Type][]*tdns.RRec)
 	for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
 		if rrec.Section == tdns.Answer {
@@ -692,6 +743,7 @@ outer:
 		panic("No valid rootkey found")
 	}
 
+	rrCache.Put(reader)
 	for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
 		switch rrec.Data.(type) {
 		case *tdns.DNSKEYGen:
@@ -702,7 +754,7 @@ outer:
 
 	zonekeys := []*tdns.RRec{rootkey}
 
-	if err := res.ValidateRoot(zonekeys, reader); err != nil {
+	if err := res.ValidateAllRRSets(zonekeys, reader); err != nil {
 		panic(fmt.Sprint("validation of root DNSKEYS failed: ", err))
 	} else {
 		res.log("root DNSKEY validation OK")
@@ -716,7 +768,7 @@ outer:
 			continue
 		}
 		res.log("Validating hints")
-		if err = res.ValidateRoot(allrootkeys, reader); err != nil {
+		if err = res.ValidateAllRRSets(allrootkeys, reader); err != nil {
 			res.log("Validation failed: %s", err)
 			continue
 		} else {
