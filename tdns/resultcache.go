@@ -265,7 +265,7 @@ func (c *RRCache) Put(m MessageReaderInterface) {
 	t := time.Now()
 
 	c.mutex.Lock()
-	for rrec := m.GetRR(); rrec != nil; rrec = m.GetRR() {
+	for rrec := m.FirstRR(); rrec != nil; rrec = m.GetRR() {
 		k1 := fmt.Sprintf("%s/%s", rrec.Name.K(), rrec.Type.String())
 		c.rr[k1] = &cacheHeader{cacheEntries: make([]*RRec, 0)}
 	}
@@ -277,7 +277,6 @@ func (c *RRCache) Put(m MessageReaderInterface) {
 		c.rr[k1].cacheEntries = append(c.rr[k1].cacheEntries, rrec)
 	}
 	c.mutex.Unlock()
-	m.Reset()
 }
 
 func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, Header, bool) {

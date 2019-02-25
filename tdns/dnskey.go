@@ -188,18 +188,12 @@ func (k *DNSKEYGen) KeyTag() KeyTag {
 }
 
 func ValidateRSA(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
-	ee := big.NewInt(0)
-	ee.SetBytes(key.PubKey[1:key.PubKey[0]+1]) // XXX Validation!
-	e := int(ee.Int64())
-	pubkeyData := key.PubKey[key.PubKey[0]+1:]
-	mod := big.NewInt(0)
-	mod = mod.SetBytes(pubkeyData)
-	pubkey := rsa.PublicKey{ N : mod, E: e}
-	buf := rrsig.Data.(*RRSIGGen).ToRDATA(rrset)
-
 	var f hash.Hash
 	var h crypto.Hash
 	switch key.Algorithm {
+	case RSASHA1:
+		f = sha1.New()
+		h = crypto.SHA1
 	case RSASHA256:
 		f = sha256.New()
 		h = crypto.SHA256
@@ -209,6 +203,16 @@ func ValidateRSA(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
 	default:
 		return fmt.Errorf("NYI")
 	}
+
+	ee := big.NewInt(0)
+	ee.SetBytes(key.PubKey[1:key.PubKey[0]+1]) // XXX Validation!
+	e := int(ee.Int64())
+	pubkeyData := key.PubKey[key.PubKey[0]+1:]
+	mod := big.NewInt(0)
+	mod = mod.SetBytes(pubkeyData)
+	pubkey := rsa.PublicKey{ N: mod, E: e}
+	buf := rrsig.Data.(*RRSIGGen).ToRDATA(rrset)
+
 
 	f.Write(buf)
 	sum := f.Sum(nil)
