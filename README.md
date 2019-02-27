@@ -47,6 +47,8 @@ Compared to the code in hello-dns, hello-dns-go has some differences
   `./tdig example.com NS 127.0.0.1:1053`
   
 `tres` is a very verbose program. This is because it is a learning tool, not a resolver intended for any real-world use.
-That said, it seems to work (albeit very slow since it has no cache) when I configure my laptop to use it as it's main 
+That said, it seems to work when I configure my laptop to use it as it's main 
 resolver.
+
+There's also a start of DNSSEC validation. This code is incomplete and should not be trusted.
   
