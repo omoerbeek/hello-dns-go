@@ -29,6 +29,9 @@ import (
 	"fmt"
 	"hash"
 	"math/big"
+
+	"github.com/otrv4/ed448"
+	"golang.org/x/crypto/ed25519"
 )
 
 const (
@@ -42,6 +45,9 @@ const (
 	RSASHA256       = 8
 	RSASHA512       = 10
 	ECDSAP256SHA256 = 13
+	ECDSAP384SHA384 = 14
+	ED25519         = 15
+	ED448           = 16
 )
 
 /*
@@ -192,33 +198,46 @@ func (k *DNSKEYGen) KeyTag() KeyTag {
 func ValidateSignature(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
 	var f hash.Hash
 	var h crypto.Hash
-	var el bool
+	var el elliptic.Curve
+	var mode int
 	switch key.Algorithm {
 	case RSASHA1:
 		f = sha1.New()
 		h = crypto.SHA1
-		el = false
+		mode = RSASHA1
 	case RSASHA256:
 		f = sha256.New()
 		h = crypto.SHA256
-		el = false
+		mode = RSASHA1
 	case RSASHA512:
 		f = sha512.New()
 		h = crypto.SHA512
-		el = false
+		mode = RSASHA1
 	case ECDSAP256SHA256:
 		f = sha256.New()
-		el = true
-
+		el = elliptic.P256()
+		mode = ECDSAP256SHA256
+	case ECDSAP384SHA384:
+		f = sha512.New384()
+		el = elliptic.P384()
+		mode = ECDSAP256SHA256
+	case ED25519:
+		mode = ED25519
+	case ED448:
+		mode = ED448
 	default:
 		return fmt.Errorf("NYI")
 	}
 
 	buf := rrsig.Data.(*RRSIGGen).ToRDATA(rrset)
-	f.Write(buf)
-	sum := f.Sum(nil)
+	var sum []byte
+	if f != nil {
+		f.Write(buf)
+		sum = f.Sum(nil)
+	}
 
-	if !el {
+	switch mode {
+	case RSASHA1:
 		// XXX Below are mostly educated guesses on the encoding of the pubkey and signature
 		// Should check against RFC etc
 		var e, mod big.Int
@@ -226,14 +245,14 @@ func ValidateSignature(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
 		mod.SetBytes(key.PubKey[key.PubKey[0]+1:])
 		pubkey := rsa.PublicKey{N: &mod, E: int(e.Int64())}
 		return rsa.VerifyPKCS1v15(&pubkey, h, sum, rrsig.Data.(*RRSIGGen).Signature)
-	} else {
+	case ECDSAP256SHA256:
 		// XXX Below are mostly educated guesses on the encoding of the pubkey and signature
 		// Should check against RFC etc
 		var x, y, r, s big.Int
 		l := len(key.PubKey)
 		x.SetBytes(key.PubKey[0 : l/2])
 		y.SetBytes(key.PubKey[l/2:])
-		pubkey := ecdsa.PublicKey{Curve: elliptic.P256(), X: &x, Y: &y}
+		pubkey := ecdsa.PublicKey{Curve: el, X: &x, Y: &y}
 		sigdata := rrsig.Data.(*RRSIGGen).Signature
 		r.SetBytes(sigdata[0:32]) // XXX Bounds checking!
 		s.SetBytes(sigdata[32:])
@@ -242,5 +261,21 @@ func ValidateSignature(rrset []*RRec, key *DNSKEYGen, rrsig *RRec) error {
 			return nil
 		}
 		return fmt.Errorf("ecdsa validation error")
+	case ED25519:
+		if ed25519.Verify(key.PubKey, buf, rrsig.Data.(*RRSIGGen).Signature) {
+			return nil
+		}
+		return fmt.Errorf("ed25519 validation error")
+	case ED448:
+		curve := ed448.NewDecafCurve()
+		var signature [112]byte
+		copy(signature[:], rrsig.Data.(*RRSIGGen).Signature)
+		var pubkey [56]byte
+		copy(pubkey[:], key.PubKey)
+		if _, err := curve.Verify(signature, buf, pubkey); err != nil {
+			return nil
+		}
+		return fmt.Errorf("ed25519 validation error")
 	}
+	return fmt.Errorf("internal validation error")
 }
