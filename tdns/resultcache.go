@@ -307,34 +307,34 @@ func (c *RRCache) getByName(name *Name, dnstype Type) ([]RRec, Header, bool) {
 	return ret, rrset.dh, true
 }
 
-func (c *RRCache) get(name *Name, dnstype Type) ([]RRec, Header, bool) {
+func (c *RRCache) get(name *Name, dnstype Type) (*Name, []RRec, Header, bool) {
 	for e := name.Name.Front(); e != nil; e = e.Next() {
 		tname := NewNameFromTail(e)
 		set, dh, ok := c.getByName(tname, dnstype)
 		if !ok {
 			continue
 		} else {
-			return set, dh, true
+			return tname, set, dh, true
 		}
 	}
-	return nil, Header{}, false
+	return MakeName("."), nil, Header{}, false
 }
 
-func (c *RRCache) GetNS(name *Name) []NameIP {
-	set, _, ok := c.get(name, NS)
+func (c *RRCache) GetNS(name *Name) (*Name, []NameIP) {
+	tname, set, _, ok := c.get(name, NS)
 	if !ok {
-		return nil
+		return tname, nil
 	}
 	var ret []NameIP
 	for _, s := range set {
 		ns := s.Data.(*NSGen).NSName
-		as, _, ok := c.get(ns, A)
+		_, as, _, ok := c.get(ns, A)
 		if ok {
 			for _, a := range as {
 				ret = append(ret, NameIP{a.Name.String(), a.Data.(*AGen).IP})
 			}
 		}
-		aaaas, _, ok := c.get(ns, AAAA)
+		_, aaaas, _, ok := c.get(ns, AAAA)
 		if ok {
 			for _, a := range aaaas {
 				ret = append(ret, NameIP{a.Name.String(), a.Data.(*AAAAGen).IP})
@@ -345,7 +345,7 @@ func (c *RRCache) GetNS(name *Name) []NameIP {
 		ret[i], ret[j] = ret[j], ret[i]
 	})
 
-	return ret
+	return tname, ret
 }
 
 type cacheReader struct {

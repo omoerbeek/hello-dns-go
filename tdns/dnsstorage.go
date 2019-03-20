@@ -316,6 +316,18 @@ func (n *Name) Equals(b *Name) bool {
 	return !n.Less(b) && !b.Less(n)
 }
 
+func (n *Name) Get(i int) *Label {
+	i = n.Len() - i - 1
+	var e *list.Element
+	for e = n.Name.Front(); e != nil && i > 0; e = e.Next() {
+		i--
+	}
+	if e == nil {
+		return nil
+	}
+	return e.Value.(*Label)
+}
+
 func (n *Name) Append(b *Name) {
 	for e := b.Name.Front(); e != nil; e = e.Next() {
 		n.Name.PushBack(e.Value.(*Label))
@@ -325,6 +337,11 @@ func (n *Name) Append(b *Name) {
 
 func (n *Name) PushBack(l *Label) {
 	n.Name.PushBack(l)
+	n.key = n.string()
+}
+
+func (n *Name) PushFront(l *Label) {
+	n.Name.PushFront(l)
 	n.key = n.string()
 }
 
