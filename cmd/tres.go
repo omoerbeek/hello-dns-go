@@ -595,6 +595,7 @@ func x() {
 }
 */
 
+// XXX THE VALIDATE CODE UNVERIFIED AND LIKELY BROKEN! DO NOT TRUST!
 func (resolver *DNSResolver) Validate(name *tdns.Name, reader tdns.MessageReaderInterface, depth int) error {
 	var records []*tdns.RRec
 	for rrec := reader.FirstRR(); rrec != nil; rrec = reader.GetRR() {
@@ -876,7 +877,7 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 	writer.DH.SetBit(tdns.QrMask)
 	writer.DH.Id = reader.DH().Id
 
-	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots, true)
+	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots, false)
 
 	switch err.(type) {
 	case nil:
@@ -973,7 +974,7 @@ func main() {
 	dt := tdns.MakeType(args[2])
 
 	resolver := DNSResolver{DNSBufSize: 4000}
-	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots, true)
+	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots, false)
 
 	if err != nil {
 		fmt.Printf("Error result for %s %s: %s\n", args[1], args[2], err)
