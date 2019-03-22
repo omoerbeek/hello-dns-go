@@ -43,7 +43,7 @@ type (
 		DoIPv6     bool
 		logprefix  string
 		numQueries int
-		loglevel LogLevel
+		loglevel   LogLevel
 	}
 
 	NxdomainError struct{}
@@ -337,6 +337,7 @@ func (resolver *DNSResolver) resolveAt(qname *tdns.Name, dnstype tdns.Type, dept
 		return result, err
 	}
 
+	var im []*tdns.RRec
 	count := 0
 outer:
 	for {
@@ -401,6 +402,12 @@ outer:
 							resolver.log(TRACE, "Unexpected error %v", err)
 						}
 					}
+					if len(result.Intermediates) > 0 {
+						im = append(im, result.Intermediates...)
+						qname = result.Intermediates[0].Data.(*tdns.CNAMEGen).CName
+						resolver.log(TRACE, "Intermediate result, chasing %s", qname)
+						break step1
+					}
 					resolver.log(TRACE, "Auths is %d Answers is %d", len(result.Auths), len(result.Answers))
 					if len(result.Auths) > 0 {
 						resolver.log(TRACE, "Case 6a, goto step1")
@@ -427,6 +434,7 @@ outer:
 		resolver.log(TRACE, "PUT IN NEGCACHE %s %s", qname, dnstype)
 		negResultCache.Put(qname, dnstype, &result, err)
 	}
+	result.Intermediates = append(result.Intermediates, im...)
 	return result, err
 }
 
@@ -591,9 +599,9 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					chaseres, err = resolver.resolveAt1(target, dnstype, depth+1, tdns.MakeName(""), &roots, cacheOnly, validate)
 					if err == nil {
 						ret.Answers = chaseres.Answers
-						for _, i := range chaseres.Intermediates {
-							ret.Intermediates = append(ret.Intermediates, i)
-						}
+						//for _, i := range chaseres.Intermediates {
+						ret.Intermediates = append(ret.Intermediates, chaseres.Intermediates...)
+						//}
 					}
 					return
 				}
@@ -770,7 +778,7 @@ func (resolver *DNSResolver) ValidateRecords(fullname *tdns.Name, records []*tdn
 					err := tdns.ValidateDNSKeyWithDS(name, a, dsrecords)
 					if err == nil {
 						ksk = rrec
-						resolver.log(TRACE,"Valid ksk DNSKEY for %s found keytag is %d", name, a.KeyTag())
+						resolver.log(TRACE, "Valid ksk DNSKEY for %s found keytag is %d", name, a.KeyTag())
 						resolver.log(TRACE, "%s", ksk)
 						break outer
 					} else {
@@ -1035,6 +1043,8 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 	resolver.log(TRACE, "BadServer: %s", badServers.Info())
 	resolver.log(TRACE, "NegResultCache: %s", negResultCache.Info())
 	resolver.log(TRACE, "RRCache: %s\n", rrCache.Info())
+
+	resolver.log(INFO, "")
 }
 
 func doListen(listenAddress string) {
@@ -1086,7 +1096,7 @@ func main() {
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
 
 	if len(args) == 3 {
-		loglevel,_ = strconv.Atoi(args[2])
+		loglevel, _ = strconv.Atoi(args[2])
 		doListen(args[1])
 	}
 	dn := tdns.MakeName(args[1])
