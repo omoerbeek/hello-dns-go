@@ -25,6 +25,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -336,7 +337,7 @@ func (resolver *DNSResolver) resolveAt(qname *tdns.Name, dnstype tdns.Type, dept
 		return result, err
 	}
 
-	var intermediates []*tdns.RRec
+	count := 0
 outer:
 	for {
 	step1:
@@ -379,6 +380,12 @@ outer:
 					}
 
 					// step 6
+					count++
+					if count > 100 {
+						resolver.log(ERROR, "Loop detection kicked in")
+						err = Servfail{}
+						break outer
+					}
 					result, err = resolver.resolveAt1(child, tdns.NS, depth, ancestor, &addresses, false, validate)
 					if err != nil {
 						switch err.(type) {
@@ -395,14 +402,6 @@ outer:
 						}
 					}
 					resolver.log(TRACE, "Auths is %d Answers is %d", len(result.Auths), len(result.Answers))
-					if len(result.Intermediates) > 0 {
-						target := result.Intermediates[0].Data.(*tdns.CNAMEGen).CName
-						resolver.log(TRACE, "Target is %s", target)
-						intermediates = append(intermediates, result.Intermediates[0])
-						qname = target
-						resolver.log(TRACE, "We have intermediates (%v)", intermediates)
-						break step1
-					}
 					if len(result.Auths) > 0 {
 						resolver.log(TRACE, "Case 6a, goto step1")
 						// Cache already done?
@@ -428,7 +427,6 @@ outer:
 		resolver.log(TRACE, "PUT IN NEGCACHE %s %s", qname, dnstype)
 		negResultCache.Put(qname, dnstype, &result, err)
 	}
-	result.Intermediates = intermediates
 	return result, err
 }
 
@@ -899,7 +897,7 @@ func (resolver *DNSResolver) ValidateAllRRSets(zonekeys []*tdns.RRec, reader tdn
 func resolveRootHints() {
 	// We do not explicitly randomize this map, since golang already
 	// does this.
-	res := DNSResolver{DNSBufSize: 4000, loglevel:ERROR}
+	res := DNSResolver{DNSBufSize: 4000, loglevel: LogLevel(loglevel)}
 	root := tdns.MakeName(".")
 	var rootkey *tdns.RRec
 	var allrootkeys []*tdns.RRec
@@ -987,7 +985,7 @@ outer:
 
 func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketReader) {
 
-	resolver := DNSResolver{DNSBufSize: 4000, DoIPv6: true, loglevel: INFO}
+	resolver := DNSResolver{DNSBufSize: 4000, DoIPv6: true, loglevel: LogLevel(loglevel)}
 
 	writer := tdns.NewMessageWriter(reader.Name(), reader.Type(), tdns.IN, math.MaxUint16)
 	writer.DH.SetBitValue(tdns.RdMask, reader.DH().Bit(tdns.RdMask))
@@ -1070,11 +1068,13 @@ func doListen(listenAddress string) {
 	}
 }
 
+var loglevel int
+
 func main() {
 	args := os.Args
-	if len(args) != 2 && len(args) != 3 {
-		fmt.Fprintf(os.Stderr, "Usage: tres name type\n")
-		fmt.Fprintf(os.Stderr, "       tres ip:port\n")
+	if len(args) != 3 && len(args) != 4 {
+		fmt.Fprintf(os.Stderr, "Usage: tres name type loglevel\n")
+		fmt.Fprintf(os.Stderr, "       tres ip:port loglevel\n")
 		os.Exit(1)
 	}
 
@@ -1085,13 +1085,14 @@ func main() {
 	resolveRootHints()
 	fmt.Printf("Retrieved . NSSET from hints, have %d addresses\n", roots.Size())
 
-	if len(args) == 2 {
+	if len(args) == 3 {
+		loglevel,_ = strconv.Atoi(args[2])
 		doListen(args[1])
 	}
 	dn := tdns.MakeName(args[1])
 	dt := tdns.MakeType(args[2])
 
-	resolver := DNSResolver{DNSBufSize: 4000, loglevel: INFO}
+	resolver := DNSResolver{DNSBufSize: 4000, loglevel: LogLevel(loglevel)}
 	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots, false)
 
 	if err != nil {
