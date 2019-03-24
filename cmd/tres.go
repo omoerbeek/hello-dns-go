@@ -391,7 +391,8 @@ outer:
 					if err != nil {
 						switch err.(type) {
 						case NxdomainError: // 6c
-							resolver.log(TRACE, "Case 6c, done")
+							resolver.log(TRACE, "Case 6c, try full")
+							result, err = resolver.resolveAt1(qname, dnstype, depth + 1, tdns.MakeName(""), &roots, false, validate)
 							break outer
 						case NodataError: // 6d
 							resolver.log(TRACE, "Case 6d, goto step3")
