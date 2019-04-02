@@ -320,25 +320,27 @@ func (resolver *DNSResolver) getResponse(ns tdns.NameIP, name *tdns.Name, dnstyp
 	return nil, fmt.Errorf("giving up on %s", ns.IP.String())
 }
 
-func (resolver *DNSResolver) resolveAt(qname *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet, validate bool) (ret tdns.ResolveResult, err error) {
+type Mode struct {
+	validate      bool
+	cacheOnly     bool
+	putInNegCache bool
+}
+
+func (resolver *DNSResolver) resolveAt(qname *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet, mode *Mode) (ret tdns.ResolveResult, err error) {
 	oldprefix := resolver.logprefix
 	resolver.logprefix = fmt.Sprintf("%s%s|%s ", strings.Repeat(" ", depth), qname, dnstype)
 	defer func() { resolver.logprefix = oldprefix }()
 
-	negcached, err := negResultCache.Get(qname, dnstype)
-	if negcached != nil {
-		resolver.log(INFO, "Found in negResultCache")
-		return *negcached, err
-	}
-
+	step1mode := Mode{validate: mode.validate, cacheOnly: true, putInNegCache: false }
 	// First we check the cache
-	result, err := resolver.resolveAt1(qname, dnstype, depth, auth, mservers, true, validate)
+	result, err := resolver.resolveAt0(qname, dnstype, depth, auth, mservers, &step1mode)
 	if _, notcached := err.(NotCachedError); !notcached {
 		return result, err
 	}
 
 	var im []*tdns.RRec
 	count := 0
+	newmode := Mode{validate: mode.validate, cacheOnly: false, putInNegCache: true}
 outer:
 	for {
 	step1:
@@ -365,7 +367,7 @@ outer:
 				for {
 					resolver.log(TRACE, "Step 3: Ancestor is %v, Child is %v, QName is %v", ancestor, child, qname)
 					if child.Equals(qname) {
-						result, err = resolver.resolveAt1(qname, dnstype, depth, ancestor, &addresses, false, validate)
+						result, err = resolver.resolveAt0(qname, dnstype, depth, ancestor, &addresses, &newmode)
 						break outer
 					}
 
@@ -387,12 +389,12 @@ outer:
 						err = Servfail{}
 						break outer
 					}
-					result, err = resolver.resolveAt1(child, tdns.NS, depth, ancestor, &addresses, false, validate)
+					result, err = resolver.resolveAt0(child, tdns.NS, depth, ancestor, &addresses, &newmode)
 					if err != nil {
 						switch err.(type) {
 						case NxdomainError: // 6c
 							resolver.log(TRACE, "Case 6c, try full")
-							result, err = resolver.resolveAt1(qname, dnstype, depth + 1, tdns.MakeName(""), &roots, false, validate)
+							result, err = resolver.resolveAt0(qname, dnstype, depth + 1, tdns.MakeName(""), &roots, &newmode)
 							break outer
 						case NodataError: // 6d
 							resolver.log(TRACE, "Case 6d, goto step3")
@@ -429,17 +431,26 @@ outer:
 		}
 	}
 
-	if err == nil {
-		//resultCache.Put(name, dnstype, &result, nil)
-	} else {
-		resolver.log(TRACE, "PUT IN NEGCACHE %s %s", qname, dnstype)
-		negResultCache.Put(qname, dnstype, &result, err)
-	}
 	result.Intermediates = append(result.Intermediates, im...)
 	return result, err
 }
 
-func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet, cacheOnly, validate bool) (ret tdns.ResolveResult, err error) {
+func (resolver *DNSResolver) resolveAt0(qname *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet, mode *Mode) (result tdns.ResolveResult, err error) {
+	negcached, err := negResultCache.Get(qname, dnstype)
+	if negcached != nil {
+		resolver.log(INFO, "Found in NegCache")
+		return *negcached, err
+	}
+
+	result, err = resolver.resolveAt1(qname, dnstype, depth, auth, mservers, mode)
+	if mode.putInNegCache && err != nil {
+		resolver.log(TRACE, "Put in NegCache %s %s", qname, dnstype)
+		negResultCache.Put(qname, dnstype, &result, err)
+	}
+	return result, err
+}
+
+func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, depth int, auth *tdns.Name, mservers *NameIPSet, mode *Mode) (ret tdns.ResolveResult, err error) {
 
 	if resolver.numQueries > 100 {
 		err = Servfail{}
@@ -473,10 +484,10 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		var newAuth tdns.Name
 		var reader tdns.MessageReaderInterface
 
-		reader, err = resolver.getResponse(server, name, dnstype, cacheOnly)
+		reader, err = resolver.getResponse(server, name, dnstype, mode.cacheOnly)
 		if err != nil {
 			resolver.log(INFO, "%s", err)
-			if cacheOnly {
+			if mode.cacheOnly {
 				if _, nic := err.(NotCachedError); nic {
 					return
 				}
@@ -524,7 +535,7 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 		var nsses = make(map[string]*tdns.Name)
 		var addresses = NewNameIPSet()
 
-		if !reader.FromCache() && validate { // XXX
+		if !reader.FromCache() && mode.validate { // XXX
 			valerr := resolver.Validate(name, reader, depth)
 			if valerr != nil {
 				resolver.log(ERROR, "Validate failed: %s", valerr)
@@ -597,12 +608,10 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					}
 
 					var chaseres tdns.ResolveResult
-					chaseres, err = resolver.resolveAt1(target, dnstype, depth+1, tdns.MakeName(""), &roots, cacheOnly, validate)
+					chaseres, err = resolver.resolveAt0(target, dnstype, depth+1, tdns.MakeName(""), &roots, mode)
 					if err == nil {
 						ret.Answers = chaseres.Answers
-						//for _, i := range chaseres.Intermediates {
 						ret.Intermediates = append(ret.Intermediates, chaseres.Intermediates...)
-						//}
 					}
 					return
 				}
@@ -623,10 +632,12 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			return
 		}
 
+		//nonegcachemode := *mode
+		//nonegcachemode.putInNegCache = false
 		resolver.log(INFO, "We got delegated to %d %s nameserver names", numns, newAuth.String())
 		if numa > 0 {
 			resolver.log(TRACE, "We have %d addresses to iterate to", numa)
-			res2, err2 := resolver.resolveAt1(name, dnstype, depth+1, &newAuth, &addresses, cacheOnly, validate)
+			res2, err2 := resolver.resolveAt0(name, dnstype, depth+1, &newAuth, &addresses, mode)
 			//if err2 != nil {
 			//	return res2, err2
 			//}
@@ -647,12 +658,13 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			rnsses[i], rnsses[j] = rnsses[j], rnsses[i]
 		})
 
+
 		for _, n := range rnsses {
 			for _, t := range []tdns.Type{tdns.A, tdns.AAAA} {
 				newns := NewNameIPSet()
 				resolver.log(TRACE, "Attempting to resolve NS %s|%s", n.String(), t)
 				var result tdns.ResolveResult
-				result, err = resolver.resolveAt1(&n, t, depth+1, tdns.MakeName(""), &roots, cacheOnly, validate)
+				result, err = resolver.resolveAt0(&n, t, depth+1, tdns.MakeName(""), &roots, mode)
 				if err != nil {
 					resolver.log(WARNING, "Failed to resolve ns name for %s %s: %s, trying next server (if there)", n.String(), t, err)
 					continue
@@ -671,7 +683,7 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 					continue
 				}
 				var res2 tdns.ResolveResult
-				res2, err = resolver.resolveAt1(name, dnstype, depth+1, &newAuth, &newns, cacheOnly, validate)
+				res2, err = resolver.resolveAt0(name, dnstype, depth+1, &newAuth, &newns, mode)
 				if err != nil {
 					_, isNd := err.(NodataError)
 					_, isNx := err.(NxdomainError)
@@ -689,9 +701,9 @@ func (resolver *DNSResolver) resolveAt1(name *tdns.Name, dnstype tdns.Type, dept
 			}
 			// Try next NS
 		}
-		return
+		return ret, Servfail{}
 	}
-	return
+	return ret, Servfail{}
 }
 
 /*
@@ -743,6 +755,7 @@ func (resolver *DNSResolver) ValidateRecords(fullname *tdns.Name, records []*tdn
 	// If we cross a authority, we need a ds record to validate the ksk in thh child
 
 	var keys []*tdns.RRec
+	mode := Mode{validate: false, cacheOnly: false, putInNegCache: true}
 
 	for i, name := range names {
 		resolver.log(TRACE, "ValidateRecords %d name=%s", i, name)
@@ -753,7 +766,7 @@ func (resolver *DNSResolver) ValidateRecords(fullname *tdns.Name, records []*tdn
 			dsrecords = tdns.TrustAnchor
 		} else {
 			resolver.log(TRACE, "Getting DS records from parent for %s", name)
-			ds, err := resolver.resolveAt(name, tdns.DS, depth+1, tdns.MakeName("."), &roots, false)
+			ds, err := resolver.resolveAt(name, tdns.DS, depth+1, tdns.MakeName("."), &roots, &mode)
 			if err == nil {
 				dsrecords = ds.Answers
 			} else {
@@ -762,7 +775,7 @@ func (resolver *DNSResolver) ValidateRecords(fullname *tdns.Name, records []*tdn
 		}
 
 		var res tdns.ResolveResult
-		res, err = resolver.resolveAt(name, tdns.DNSKEY, depth+1, tdns.MakeName("."), &roots, false)
+		res, err = resolver.resolveAt(name, tdns.DNSKEY, depth+1, tdns.MakeName("."), &roots, &mode)
 		if err != nil {
 			break
 		}
@@ -1002,7 +1015,8 @@ func processQuery(conn *net.UDPConn, address *net.UDPAddr, reader *tdns.PacketRe
 	writer.DH.SetBit(tdns.QrMask)
 	writer.DH.Id = reader.DH().Id
 
-	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots, false)
+	mode := Mode{validate: false, cacheOnly: false, putInNegCache: true}
+	res, err := resolver.resolveAt(reader.Name(), reader.Type(), 0, tdns.MakeName(""), &roots, &mode)
 
 	switch err.(type) {
 	case nil:
@@ -1104,7 +1118,8 @@ func main() {
 	dt := tdns.MakeType(args[2])
 
 	resolver := DNSResolver{DNSBufSize: 4000, loglevel: LogLevel(loglevel)}
-	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots, false)
+	mode := Mode{validate: false, cacheOnly: false, putInNegCache: true}
+	res, err := resolver.resolveAt(dn, dt, 0, tdns.MakeName(""), &roots, &mode)
 
 	if err != nil {
 		fmt.Printf("Error result for %s %s: %s\n", args[1], args[2], err)
