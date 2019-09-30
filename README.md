@@ -51,4 +51,4 @@ That said, it seems to work when I configure my laptop to use it as it's main
 resolver.
 
 There's also a start of DNSSEC validation. This code is incomplete and should not be trusted.
-  
+ 
